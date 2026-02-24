@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tree Browser</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="sidebar">
+  <h2>Tree Browser</h2>
+
+  <div class="section">
+    <h3>Layout</h3>
+    <div class="row">
+      <label><input type="radio" name="layout" value="rectangular" checked> Rectangular</label>
+      <label><input type="radio" name="layout" value="circular"> Circular</label>
+      <label><input type="radio" name="layout" value="unrooted"> Unrooted</label>
+    </div>
+    <div><label><input type="checkbox" id="phylogram-toggle" checked> Use branch lengths</label></div>
+    <div><label><input type="checkbox" id="tip-labels-toggle" checked> Show tip labels</label></div>
+    <div><label><input type="checkbox" id="bootstrap-toggle"> Show bootstraps</label></div>
+    <div class="row">
+      <label>Tip spacing: <input type="range" id="tip-spacing" min="8" max="40" value="16"></label>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Species Highlighting</h3>
+    <div class="row">
+      <button id="select-all-species" class="btn-sm">All</button>
+      <button id="select-none-species" class="btn-sm">None</button>
+    </div>
+    <div id="species-list"></div>
+  </div>
+
+  <div class="section">
+    <h3>Name Search</h3>
+    <div class="row">
+      <input type="text" id="name-input" placeholder="e.g. Phvul or YS121">
+      <button id="name-search" class="btn">Search</button>
+    </div>
+    <div id="name-result"></div>
+    <div id="name-matches-list" class="name-matches-list"></div>
+  </div>
+
+  <div class="section">
+    <h3>Motif Search</h3>
+    <div class="row">
+      <select id="motif-type">
+        <option value="regex">Regex</option>
+        <option value="prosite">PROSITE</option>
+      </select>
+    </div>
+    <div class="row">
+      <input type="text" id="motif-input" placeholder="e.g. LRR or L-x-x-L">
+      <button id="motif-search" class="btn">Search</button>
+    </div>
+    <div id="motif-result"></div>
+  </div>
+
+  <div class="section">
+    <h3>Shared Nodes</h3>
+    <p class="hint">Select species above, then:</p>
+    <button id="highlight-shared" class="btn">Highlight nodes with all checked species</button>
+    <details class="exclude-section">
+      <summary>Exclude species</summary>
+      <p class="hint">Nodes must NOT contain any of these:</p>
+      <div class="row">
+        <button id="exclude-none" class="btn-sm">None</button>
+      </div>
+      <div id="exclude-species-list"></div>
+    </details>
+    <div id="shared-result"></div>
+  </div>
+
+  <div class="section" id="export-section">
+    <h3>Export Alignment</h3>
+    <div id="export-info" class="hint">Shift-click a node to select</div>
+    <div id="export-form" style="display:none;">
+    <details class="export-tips-details">
+      <summary id="export-tips-summary">Tip names</summary>
+      <div id="export-tips-list" class="export-tips-list"></div>
+    </details>
+
+    <label class="export-label">Extra sequences (comma-separated):</label>
+    <input type="text" id="export-extra-tips" placeholder="e.g. tip1, tip2">
+
+    <fieldset class="export-fieldset">
+      <legend>Position range</legend>
+      <label><input type="radio" name="export-range" value="full" checked> Full alignment</label>
+      <label>
+        <input type="radio" name="export-range" value="columns"> Alignment columns:
+        <input type="number" id="export-col-start" min="1" class="export-num" placeholder="start">
+        &ndash;
+        <input type="number" id="export-col-end" min="1" class="export-num" placeholder="end">
+      </label>
+      <label>
+        <input type="radio" name="export-range" value="refseq"> Reference sequence:
+      </label>
+      <div class="export-ref-row">
+        <input type="text" id="export-ref-seq" placeholder="sequence name" list="tip-datalist">
+        <span>pos</span>
+        <input type="number" id="export-ref-start" min="1" class="export-num" placeholder="start">
+        &ndash;
+        <input type="number" id="export-ref-end" min="1" class="export-num" placeholder="end">
+      </div>
+    </fieldset>
+
+    <button id="export-btn" class="btn">Export FASTA</button>
+    <div id="export-result"></div>
+    </div>
+  </div>
+</div>
+
+<datalist id="tip-datalist"></datalist>
+
+<div id="tree-container">
+  <svg id="tree-svg">
+    <g id="tree-group"></g>
+  </svg>
+</div>
+
+<div id="tooltip"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

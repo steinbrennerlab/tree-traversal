@@ -1,0 +1,66 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { display: flex; height: 100vh; font-family: system-ui, sans-serif; font-size: 13px; overflow: hidden; }
+
+#sidebar {
+  width: 280px; min-width: 280px; padding: 12px; overflow-y: auto;
+  background: #f5f5f5; border-right: 1px solid #ccc;
+}
+#sidebar h2 { font-size: 16px; margin-bottom: 10px; }
+#sidebar h3 { font-size: 13px; margin-bottom: 6px; color: #444; }
+.section { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #ddd; }
+.row { margin-bottom: 6px; display: flex; gap: 6px; align-items: center; }
+.hint { font-size: 11px; color: #888; margin-bottom: 4px; }
+
+#species-list { max-height: 240px; overflow-y: auto; }
+#species-list label { display: flex; align-items: center; gap: 4px; padding: 1px 0; cursor: pointer; font-size: 12px; }
+.sp-swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+
+input[type=text], select { padding: 4px 6px; border: 1px solid #bbb; border-radius: 3px; font-size: 12px; }
+input[type=text] { flex: 1; }
+.btn, .btn-sm { padding: 4px 10px; border: 1px solid #999; border-radius: 3px; background: #fff; cursor: pointer; font-size: 12px; }
+.btn:hover, .btn-sm:hover { background: #e8e8e8; }
+
+#tree-container { flex: 1; overflow: hidden; position: relative; background: #fff; }
+#tree-svg { width: 100%; height: 100%; }
+
+#tooltip {
+  display: none; position: fixed; padding: 6px 10px; background: rgba(0,0,0,.85);
+  color: #fff; font-size: 11px; border-radius: 4px; pointer-events: none; z-index: 100;
+  max-width: 400px; white-space: pre-wrap;
+}
+
+.tip-label { font-size: 10px; cursor: pointer; }
+.tip-label:hover { font-weight: bold; }
+.node-dot { cursor: pointer; }
+.motif-match { stroke: #e22; stroke-width: 2; }
+.shared-node { fill: #ff6600; stroke: #c40; stroke-width: 1.5; }
+.collapsed-triangle { fill: #cde; stroke: #89a; cursor: pointer; }
+
+.exclude-section { margin-top: 8px; }
+.exclude-section summary { font-size: 12px; cursor: pointer; color: #666; }
+#exclude-species-list { max-height: 180px; overflow-y: auto; margin-top: 4px; }
+#exclude-species-list label { display: flex; align-items: center; gap: 4px; padding: 1px 0; cursor: pointer; font-size: 12px; }
+
+/* Export panel */
+.export-label { display: block; margin: 6px 0 2px; font-size: 12px; color: #444; }
+.export-tips-details { margin: 4px 0; }
+.export-tips-details summary { font-size: 12px; cursor: pointer; color: #666; }
+.export-tips-list { max-height: 120px; overflow-y: auto; font-size: 11px; font-family: monospace; white-space: pre; background: #fff; border: 1px solid #ddd; padding: 4px; margin-top: 2px; }
+.export-fieldset { border: 1px solid #ccc; border-radius: 4px; padding: 6px 8px; margin: 6px 0; }
+.export-fieldset legend { font-size: 12px; color: #444; padding: 0 4px; }
+.export-fieldset label { display: block; font-size: 12px; margin: 3px 0; }
+.export-num { width: 60px; padding: 2px 4px; font-size: 12px; }
+.export-ref-row { display: flex; gap: 4px; align-items: center; margin: 2px 0 2px 18px; flex-wrap: wrap; }
+.export-ref-row input[type="text"] { flex: 1; min-width: 100px; }
+.export-ref-row span { font-size: 12px; color: #666; }
+#export-result { font-size: 12px; color: #27ae60; margin-top: 4px; }
+#export-btn { margin-top: 6px; }
+
+/* Name search matches list */
+.name-matches-list { max-height: 140px; overflow-y: auto; font-size: 11px; font-family: monospace; white-space: pre; color: #2563eb; margin-top: 2px; }
+
+/* Bootstrap labels */
+.bootstrap-label { font-size: 8px; fill: #666; pointer-events: none; }
+
+/* Tip dots */
+.tip-dot { cursor: pointer; }

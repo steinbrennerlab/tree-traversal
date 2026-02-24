@@ -1,0 +1,14 @@
+# Project instructions (local only)
+CLAUDE.md
+
+# Claude Code internal
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db
