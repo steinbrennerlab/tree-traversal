@@ -1,4 +1,4 @@
-/* Tree Browser — lightweight phylogenetic tree viewer */
+/* PhyloScope — lightweight phylogenetic tree viewer */
 
 // ---------------------------------------------------------------------------
 // State

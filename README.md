@@ -1,8 +1,24 @@
-# Tree Browser
+# PhyloScope
 
-Interactive phylogenetic tree viewer. Built with FastAPI (Python) and vanilla JS/SVG.
+A lightweight, local-first phylogenetic tree viewer with built-in sequence tools. Built with FastAPI (Python) and vanilla JS/SVG.
 
-![Tree Browser screenshot](screenshot.png)
+![PhyloScope screenshot](screenshot.png)
+
+## How it compares
+
+| Feature | PhyloScope | iTOL | FigTree | ETE Toolkit |
+|---|---|---|---|---|
+| Hosting | Local, self-hosted | Cloud (freemium) | Desktop (Java) | Python library |
+| Setup | `pip install` + run | Account signup | Download JAR | `pip install` |
+| Privacy | All data stays local | Data uploaded | Local | Local |
+| Layouts | Rectangular, circular, unrooted | Rectangular, circular, unrooted + more | Rectangular, circular, radial | All major layouts |
+| Species coloring | Built-in from FASTA filenames | Manual annotation files | Manual | Programmatic |
+| Motif search | Regex + PROSITE on sequences | No | No | Programmatic |
+| Shared node finding | Built-in species filter | No | No | Scriptable |
+| Alignment export | Subtree FASTA slicing | No | No | Scriptable |
+| Annotation | Basic (species, bootstrap) | Very rich (heatmaps, domains, bars) | Moderate | Very rich |
+| Publication figures | No SVG export yet | Yes, high quality | Yes | Yes |
+| Large trees (10k+) | Client-side SVG, may slow | Optimized for large trees | Moderate | Good |
 
 ## Installation
 
@@ -69,7 +85,7 @@ On launch, a setup dialog prompts for an input folder path. You can type a path 
 
 ## Input Folder Structure
 
-Point the browser at any folder containing:
+Point PhyloScope at any folder containing:
 
 | File | Description |
 |------|-------------|
