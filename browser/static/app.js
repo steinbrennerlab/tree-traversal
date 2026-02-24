@@ -880,5 +880,112 @@ setupPathInput.addEventListener("keydown", e => {
   }
 })();
 
+// ---------------------------------------------------------------------------
+// SVG / PNG export
+// ---------------------------------------------------------------------------
+const INLINE_STYLES = {
+  ".tip-label": "font-size:10px;font-family:system-ui,sans-serif",
+  ".motif-match": "stroke:#e22;stroke-width:2",
+  ".shared-node": "fill:#ff6600;stroke:#c40;stroke-width:1.5",
+  ".collapsed-triangle": "fill:#cde;stroke:#89a",
+  ".bootstrap-label": "font-size:8px;fill:#666",
+};
+
+function buildExportSVGString() {
+  const original = document.getElementById("tree-svg");
+  const clone = original.cloneNode(true);
+  const g = clone.querySelector("#tree-group");
+
+  // Compute tight bounding box from the live tree-group
+  const liveGroup = document.getElementById("tree-group");
+  const bbox = liveGroup.getBBox();
+  const pad = 20;
+  const vx = bbox.x - pad;
+  const vy = bbox.y - pad;
+  const vw = bbox.width + pad * 2;
+  const vh = bbox.height + pad * 2;
+
+  clone.setAttribute("viewBox", `${vx} ${vy} ${vw} ${vh}`);
+  clone.setAttribute("width", vw);
+  clone.setAttribute("height", vh);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+
+  // Remove pan/zoom transform — viewBox handles framing
+  g.removeAttribute("transform");
+
+  // Inline CSS for standalone rendering
+  for (const [selector, style] of Object.entries(INLINE_STYLES)) {
+    clone.querySelectorAll(selector).forEach(el => {
+      el.setAttribute("style", (el.getAttribute("style") || "") + ";" + style);
+    });
+  }
+
+  return { svgString: new XMLSerializer().serializeToString(clone), width: vw, height: vh };
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportSVG() {
+  const resultEl = document.getElementById("export-viz-result");
+  try {
+    const { svgString } = buildExportSVGString();
+    const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    triggerDownload(blob, "phyloscope-tree.svg");
+    resultEl.style.color = "#27ae60";
+    resultEl.textContent = "SVG downloaded.";
+  } catch (e) {
+    resultEl.style.color = "#c0392b";
+    resultEl.textContent = `Export failed: ${e.message}`;
+  }
+}
+
+function exportPNG() {
+  const resultEl = document.getElementById("export-viz-result");
+  try {
+    const { svgString, width, height } = buildExportSVGString();
+    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      const dpr = 2; // retina quality
+      const canvas = document.createElement("canvas");
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(dpr, dpr);
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(blob => {
+        triggerDownload(blob, "phyloscope-tree.png");
+        resultEl.style.color = "#27ae60";
+        resultEl.textContent = "PNG downloaded.";
+      }, "image/png");
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resultEl.style.color = "#c0392b";
+      resultEl.textContent = "PNG rendering failed.";
+    };
+    img.src = url;
+  } catch (e) {
+    resultEl.style.color = "#c0392b";
+    resultEl.textContent = `Export failed: ${e.message}`;
+  }
+}
+
+document.getElementById("export-svg-btn").addEventListener("click", exportSVG);
+document.getElementById("export-png-btn").addEventListener("click", exportPNG);
+
 // Wire up export button and load tip datalist after DOM ready
 document.getElementById("export-btn").addEventListener("click", doExport);

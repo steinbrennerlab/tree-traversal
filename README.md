@@ -17,7 +17,7 @@ A lightweight, local-first phylogenetic tree viewer with built-in sequence tools
 | Shared node finding | Built-in species filter | No | No | Scriptable |
 | Alignment export | Subtree FASTA slicing | No | No | Scriptable |
 | Annotation | Basic (species, bootstrap) | Very rich (heatmaps, domains, bars) | Moderate | Very rich |
-| Publication figures | No SVG export yet | Yes, high quality | Yes | Yes |
+| Publication figures | SVG and PNG export | Yes, high quality | Yes | Yes |
 | Large trees (10k+) | Client-side SVG, may slow | Optimized for large trees | Moderate | Good |
 
 ## Installation
@@ -123,6 +123,10 @@ An example dataset is provided in `example_data/`.
 ### Shared Nodes
 - Select species, then highlight all internal nodes containing all checked species
 - Optional species exclusion filter (nodes must not contain excluded species)
+
+### Image Export
+- **SVG**: download a standalone SVG with inlined styles (opens in any browser or Inkscape)
+- **PNG**: download a 2x resolution PNG for presentations and documents
 
 ### Alignment Export
 - **Shift-click** an internal node to select it for export
