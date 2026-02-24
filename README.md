@@ -2,6 +2,8 @@
 
 Interactive phylogenetic tree viewer. Built with FastAPI (Python) and vanilla JS/SVG.
 
+![Tree Browser screenshot](screenshot.png)
+
 ## Installation
 
 The app requires Python 3.10+ with **fastapi** and **uvicorn**.
