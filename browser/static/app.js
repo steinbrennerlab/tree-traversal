@@ -89,6 +89,7 @@ async function init() {
   buildExcludeSpeciesList(speciesList);
   setupControls();
   renderTree();
+  loadTipDatalist();
 }
 
 function indexNodes(node) {
@@ -742,10 +743,142 @@ function doExport() {
 }
 
 // ---------------------------------------------------------------------------
-// Start
+// Filesystem browser
 // ---------------------------------------------------------------------------
-init();
+const browserPanel = document.getElementById("setup-browser");
+const browserDirList = document.getElementById("browser-dir-list");
+const browserCurrentPath = document.getElementById("browser-current-path");
+const browserUpBtn = document.getElementById("browser-up");
+const browserSelectBtn = document.getElementById("browser-select");
+const browserValidIndicator = document.getElementById("browser-valid-indicator");
+let browserCurrentDir = null;
+let browserParentDir = null;
+
+async function browserNavigate(path) {
+  const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : "/api/browse";
+  try {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (!resp.ok) {
+      document.getElementById("setup-error").textContent = data.error || "Browse failed.";
+      return;
+    }
+    browserCurrentDir = data.current;
+    browserParentDir = data.parent;
+    browserCurrentPath.textContent = data.current;
+    browserUpBtn.disabled = !data.parent;
+
+    const isValid = data.has_nwk && data.has_aa_fa;
+    browserValidIndicator.style.display = isValid ? "" : "none";
+    browserSelectBtn.disabled = !isValid;
+
+    browserDirList.innerHTML = "";
+    if (data.dirs.length === 0) {
+      const empty = document.createElement("div");
+      empty.style.cssText = "padding:8px;font-size:12px;color:#888;text-align:center;";
+      empty.textContent = "No subdirectories";
+      browserDirList.appendChild(empty);
+    } else {
+      for (const dir of data.dirs) {
+        const entry = document.createElement("div");
+        entry.className = "browser-dir-entry";
+        entry.textContent = dir;
+        entry.addEventListener("click", () => browserNavigate(data.current + "/" + dir));
+        browserDirList.appendChild(entry);
+      }
+    }
+  } catch (e) {
+    document.getElementById("setup-error").textContent = `Browse error: ${e.message}`;
+  }
+}
+
+document.getElementById("setup-browse").addEventListener("click", () => {
+  const isHidden = browserPanel.style.display === "none";
+  browserPanel.style.display = isHidden ? "" : "none";
+  if (isHidden) {
+    const currentVal = document.getElementById("setup-path").value.trim();
+    browserNavigate(currentVal || null);
+  }
+});
+
+browserUpBtn.addEventListener("click", () => {
+  if (browserParentDir) browserNavigate(browserParentDir);
+});
+
+browserSelectBtn.addEventListener("click", () => {
+  if (browserCurrentDir) {
+    document.getElementById("setup-path").value = browserCurrentDir;
+    browserPanel.style.display = "none";
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Setup flow — check status, show dialog or go straight to init
+// ---------------------------------------------------------------------------
+const setupOverlay = document.getElementById("setup-overlay");
+const setupPathInput = document.getElementById("setup-path");
+const setupLoadBtn = document.getElementById("setup-load");
+const setupError = document.getElementById("setup-error");
+
+function showSetup() {
+  setupOverlay.style.display = "flex";
+}
+
+function hideSetup() {
+  setupOverlay.style.display = "none";
+}
+
+async function doSetupLoad() {
+  const inputDir = setupPathInput.value.trim();
+  if (!inputDir) {
+    setupError.textContent = "Please enter a folder path.";
+    return;
+  }
+  setupError.textContent = "";
+  setupLoadBtn.disabled = true;
+  setupLoadBtn.textContent = "Loading...";
+
+  try {
+    const resp = await fetch("/api/load", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({input_dir: inputDir}),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      setupError.textContent = data.error || "Failed to load data.";
+      return;
+    }
+    hideSetup();
+    await init();
+  } catch (e) {
+    setupError.textContent = `Error: ${e.message}`;
+  } finally {
+    setupLoadBtn.disabled = false;
+    setupLoadBtn.textContent = "Load";
+  }
+}
+
+setupLoadBtn.addEventListener("click", doSetupLoad);
+setupPathInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") doSetupLoad();
+});
+
+// On page load: check if data is already loaded
+(async function checkStatus() {
+  try {
+    const resp = await fetch("/api/status");
+    const data = await resp.json();
+    if (data.loaded) {
+      hideSetup();
+      await init();
+    } else {
+      showSetup();
+    }
+  } catch (e) {
+    showSetup();
+  }
+})();
 
 // Wire up export button and load tip datalist after DOM ready
 document.getElementById("export-btn").addEventListener("click", doExport);
-loadTipDatalist();

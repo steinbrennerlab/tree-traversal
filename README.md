@@ -1,6 +1,6 @@
 # Tree Browser
 
-Interactive phylogenetic tree viewer for the Ngou RLP analysis. Built with FastAPI (Python) and vanilla JS/SVG.
+Interactive phylogenetic tree viewer. Built with FastAPI (Python) and vanilla JS/SVG.
 
 ## Quick Start
 

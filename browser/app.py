@@ -6,17 +6,26 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 # ---------------------------------------------------------------------------
-# Config
+# Application state (populated by load_data)
 # ---------------------------------------------------------------------------
-INPUT_DIR = Path(__file__).resolve().parent.parent / "input"
-NWK_FILE = INPUT_DIR / "Phvul.007G077500.1.nwk"
-AA_FILE = INPUT_DIR / "Phvul.007G077500.1.csv.aa.fa"
-ORTHO_DIR = INPUT_DIR / "orthofinder-input"
+state = {
+    "loaded": False,
+    "input_dir": None,
+    "gene": None,
+    "tree_data": None,
+    "tree_json": None,
+    "protein_seqs": None,
+    "protein_seqs_ungapped": None,
+    "species_to_tips": {},
+    "tip_to_species": {},
+    "num_seqs": 0,
+    "num_species": 0,
+}
 
 # ---------------------------------------------------------------------------
 # Newick parser (pure Python, no dependencies)
@@ -109,7 +118,7 @@ def parse_fasta(path):
 # ---------------------------------------------------------------------------
 # Species mapping from orthofinder-input
 # ---------------------------------------------------------------------------
-def build_species_map():
+def build_species_map(tree_data, ortho_dir):
     """Build tip→species and species→[tips] from orthofinder-input FASTA headers."""
     species_to_tips = {}
     tip_to_species = {}
@@ -125,7 +134,7 @@ def build_species_map():
 
     collect_tips(tree_data)
 
-    for fpath in sorted(ORTHO_DIR.iterdir()):
+    for fpath in sorted(ortho_dir.iterdir()):
         if not (fpath.suffix in (".fa", ".fasta")):
             continue
         fname = fpath.stem  # e.g. "new_genomes.Aameric_YS121.v1.cds"
@@ -247,28 +256,7 @@ def prosite_to_regex(pattern):
 
 
 # ---------------------------------------------------------------------------
-# Startup: load data
-# ---------------------------------------------------------------------------
-print("Loading tree...")
-with open(NWK_FILE) as f:
-    nwk_string = f.read().strip()
-tree_data = _parse_newick(nwk_string)
-
-print("Loading protein sequences...")
-protein_seqs = parse_fasta(str(AA_FILE))
-# Store ungapped versions for motif search
-protein_seqs_ungapped = {k: v.replace("-", "") for k, v in protein_seqs.items()}
-
-print("Building species map...")
-species_to_tips, tip_to_species = build_species_map()
-
-print("Annotating tree with species...")
-annotate_species(tree_data, tip_to_species)
-
-print(f"Loaded: {len(protein_seqs)} sequences, {len(species_to_tips)} species")
-
-# ---------------------------------------------------------------------------
-# Serialise tree to JSON-friendly format (strip descendant_species sets from output)
+# Serialise tree to JSON-friendly format
 # ---------------------------------------------------------------------------
 def tree_to_json(node):
     """Convert tree node to JSON-serializable dict (keep it slim)."""
@@ -287,74 +275,92 @@ def tree_to_json(node):
     return result
 
 
-tree_json = tree_to_json(tree_data)
-
 # ---------------------------------------------------------------------------
-# FastAPI app
+# Load data from an input directory
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Tree Browser")
+def load_data(input_dir_str):
+    """Auto-detect files in input_dir, parse tree + alignment + species.
 
-STATIC_DIR = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    Returns (success: bool, error_message: str | None).
+    """
+    global _node_counter
 
+    # Resolve relative paths against the project root (parent of browser/)
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    input_path = Path(input_dir_str)
+    if not input_path.is_absolute():
+        input_path = PROJECT_ROOT / input_path
+    input_dir = input_path.resolve()
+    if not input_dir.is_dir():
+        return False, f"Directory not found: {input_dir}"
 
-@app.get("/")
-async def index():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    # Auto-detect .nwk file
+    nwk_files = list(input_dir.glob("*.nwk"))
+    if len(nwk_files) == 0:
+        return False, f"No .nwk file found in {input_dir}"
+    if len(nwk_files) > 1:
+        return False, f"Multiple .nwk files found in {input_dir}: {[f.name for f in nwk_files]}"
+    nwk_file = nwk_files[0]
 
+    # Auto-detect *.aa.fa file
+    aa_files = list(input_dir.glob("*.aa.fa"))
+    if len(aa_files) == 0:
+        return False, f"No *.aa.fa file found in {input_dir}"
+    if len(aa_files) > 1:
+        return False, f"Multiple *.aa.fa files found in {input_dir}: {[f.name for f in aa_files]}"
+    aa_file = aa_files[0]
 
-@app.get("/api/tree")
-async def get_tree():
-    return tree_json
+    # Derive gene name from .nwk filename (strip extension)
+    gene = nwk_file.stem
 
+    # Reset parser state
+    _node_counter = 0
 
-@app.get("/api/species")
-async def get_species():
-    return {
-        "species": sorted(species_to_tips.keys()),
-        "species_to_tips": species_to_tips,
-    }
+    # Parse tree
+    print(f"Loading tree from {nwk_file.name}...")
+    with open(nwk_file) as f:
+        nwk_string = f.read().strip()
+    tree_data = _parse_newick(nwk_string)
 
+    # Parse alignment
+    print(f"Loading protein sequences from {aa_file.name}...")
+    protein_seqs = parse_fasta(str(aa_file))
+    protein_seqs_ungapped = {k: v.replace("-", "") for k, v in protein_seqs.items()}
 
-@app.get("/api/motif")
-async def search_motif(
-    pattern: str = Query(..., description="Regex or PROSITE pattern"),
-    type: str = Query("regex", description="'regex' or 'prosite'"),
-):
-    if type == "prosite":
-        try:
-            regex_str = prosite_to_regex(pattern)
-        except Exception as e:
-            return {"error": f"Invalid PROSITE pattern: {e}", "matched_tips": []}
+    # Species mapping (optional — skip if orthofinder-input/ missing)
+    ortho_dir = input_dir / "orthofinder-input"
+    if ortho_dir.is_dir():
+        print("Building species map...")
+        species_to_tips, tip_to_species = build_species_map(tree_data, ortho_dir)
+        print("Annotating tree with species...")
+        annotate_species(tree_data, tip_to_species)
     else:
-        regex_str = pattern
+        print("No orthofinder-input/ found, skipping species mapping.")
+        species_to_tips, tip_to_species = {}, {}
 
-    try:
-        compiled = re.compile(regex_str, re.IGNORECASE)
-    except re.error as e:
-        return {"error": f"Invalid regex: {e}", "matched_tips": []}
+    tree_json = tree_to_json(tree_data)
 
-    matched = [
-        tip
-        for tip, seq in protein_seqs_ungapped.items()
-        if compiled.search(seq)
-    ]
-    return {"matched_tips": sorted(matched), "pattern_used": regex_str}
+    # Update global state
+    state.update({
+        "loaded": True,
+        "input_dir": str(input_dir),
+        "gene": gene,
+        "tree_data": tree_data,
+        "tree_json": tree_json,
+        "protein_seqs": protein_seqs,
+        "protein_seqs_ungapped": protein_seqs_ungapped,
+        "species_to_tips": species_to_tips,
+        "tip_to_species": tip_to_species,
+        "num_seqs": len(protein_seqs),
+        "num_species": len(species_to_tips),
+    })
 
-
-@app.get("/api/nodes-by-species")
-async def nodes_by_species(
-    species: list[str] = Query(..., description="Species to require"),
-    exclude: list[str] = Query([], description="Species to exclude"),
-):
-    required = set(species)
-    excluded = set(exclude)
-    node_ids = find_nodes_with_species(tree_data, required, excluded)
-    return {"highlighted_nodes": node_ids}
+    print(f"Loaded: {state['num_seqs']} sequences, {state['num_species']} species")
+    return True, None
 
 
 # ---------------------------------------------------------------------------
-# Tree traversal helpers for export
+# Tree traversal helpers
 # ---------------------------------------------------------------------------
 def find_node_by_id(node, target_id):
     """Find a node in the tree by its ID."""
@@ -378,10 +384,7 @@ def collect_descendant_tips(node):
 
 
 def ref_pos_to_columns(ref_seq_gapped, ref_start, ref_end):
-    """Map 1-indexed reference residue positions to alignment column indices.
-
-    Returns (col_start, col_end) as 0-indexed Python slice bounds.
-    """
+    """Map 1-indexed reference residue positions to alignment column indices."""
     col_start = None
     col_end = None
     residue_pos = 0
@@ -391,14 +394,174 @@ def ref_pos_to_columns(ref_seq_gapped, ref_start, ref_end):
             if residue_pos == ref_start and col_start is None:
                 col_start = col_idx
             if residue_pos == ref_end:
-                col_end = col_idx + 1  # exclusive end for slicing
+                col_end = col_idx + 1
                 break
     return col_start, col_end
 
 
+# ---------------------------------------------------------------------------
+# Helper: require data loaded
+# ---------------------------------------------------------------------------
+def require_loaded():
+    """Return a JSONResponse error if data not loaded, else None."""
+    if not state["loaded"]:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No data loaded. Use the setup dialog to load an input folder."},
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------------------------
+app = FastAPI(title="Tree Browser")
+
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/")
+async def index():
+    return FileResponse(str(STATIC_DIR / "index.html"))
+
+
+@app.get("/api/browse")
+async def api_browse(path: Optional[str] = Query(None)):
+    """List subdirectories and check for valid input files."""
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    if path:
+        browse_path = Path(path).resolve()
+    else:
+        browse_path = PROJECT_ROOT
+
+    if not browse_path.is_dir():
+        return JSONResponse(status_code=400, content={"error": f"Not a directory: {browse_path}"})
+
+    try:
+        dirs = sorted(
+            entry.name for entry in browse_path.iterdir()
+            if entry.is_dir() and not entry.name.startswith(".")
+        )
+    except PermissionError:
+        return JSONResponse(status_code=403, content={"error": f"Permission denied: {browse_path}"})
+
+    has_nwk = any(browse_path.glob("*.nwk"))
+    has_aa_fa = any(browse_path.glob("*.aa.fa"))
+
+    parent = str(browse_path.parent) if browse_path.parent != browse_path else None
+
+    return {
+        "current": str(browse_path),
+        "parent": parent,
+        "dirs": dirs,
+        "has_nwk": has_nwk,
+        "has_aa_fa": has_aa_fa,
+    }
+
+
+@app.get("/api/status")
+async def api_status():
+    if state["loaded"]:
+        return {
+            "loaded": True,
+            "gene": state["gene"],
+            "input_dir": state["input_dir"],
+            "num_seqs": state["num_seqs"],
+            "num_species": state["num_species"],
+        }
+    return {"loaded": False}
+
+
+@app.post("/api/load")
+async def api_load(request: Request):
+    body = await request.json()
+    input_dir = body.get("input_dir", "").strip()
+    if not input_dir:
+        return JSONResponse(status_code=400, content={"error": "input_dir is required"})
+
+    success, error = load_data(input_dir)
+    if not success:
+        return JSONResponse(status_code=400, content={"error": error})
+
+    return {
+        "loaded": True,
+        "gene": state["gene"],
+        "input_dir": state["input_dir"],
+        "num_seqs": state["num_seqs"],
+        "num_species": state["num_species"],
+    }
+
+
+@app.get("/api/tree")
+async def get_tree():
+    err = require_loaded()
+    if err:
+        return err
+    return state["tree_json"]
+
+
+@app.get("/api/species")
+async def get_species():
+    err = require_loaded()
+    if err:
+        return err
+    return {
+        "species": sorted(state["species_to_tips"].keys()),
+        "species_to_tips": state["species_to_tips"],
+    }
+
+
+@app.get("/api/motif")
+async def search_motif(
+    pattern: str = Query(..., description="Regex or PROSITE pattern"),
+    type: str = Query("regex", description="'regex' or 'prosite'"),
+):
+    err = require_loaded()
+    if err:
+        return err
+
+    if type == "prosite":
+        try:
+            regex_str = prosite_to_regex(pattern)
+        except Exception as e:
+            return {"error": f"Invalid PROSITE pattern: {e}", "matched_tips": []}
+    else:
+        regex_str = pattern
+
+    try:
+        compiled = re.compile(regex_str, re.IGNORECASE)
+    except re.error as e:
+        return {"error": f"Invalid regex: {e}", "matched_tips": []}
+
+    matched = [
+        tip
+        for tip, seq in state["protein_seqs_ungapped"].items()
+        if compiled.search(seq)
+    ]
+    return {"matched_tips": sorted(matched), "pattern_used": regex_str}
+
+
+@app.get("/api/nodes-by-species")
+async def nodes_by_species(
+    species: list[str] = Query(..., description="Species to require"),
+    exclude: list[str] = Query([], description="Species to exclude"),
+):
+    err = require_loaded()
+    if err:
+        return err
+    required = set(species)
+    excluded = set(exclude)
+    node_ids = find_nodes_with_species(state["tree_data"], required, excluded)
+    return {"highlighted_nodes": node_ids}
+
+
 @app.get("/api/node-tips")
 async def node_tips(node_id: int = Query(..., description="Node ID")):
-    node = find_node_by_id(tree_data, node_id)
+    err = require_loaded()
+    if err:
+        return err
+    node = find_node_by_id(state["tree_data"], node_id)
     if not node:
         return {"error": "Node not found", "tips": []}
     tips = collect_descendant_tips(node)
@@ -408,7 +571,10 @@ async def node_tips(node_id: int = Query(..., description="Node ID")):
 @app.get("/api/tip-names")
 async def tip_names():
     """Return all tip names for autocomplete."""
-    return {"tips": sorted(protein_seqs.keys())}
+    err = require_loaded()
+    if err:
+        return err
+    return {"tips": sorted(state["protein_seqs"].keys())}
 
 
 @app.get("/api/export")
@@ -421,12 +587,15 @@ async def export_alignment(
     ref_start: Optional[int] = Query(None, description="Start residue position in reference"),
     ref_end: Optional[int] = Query(None, description="End residue position in reference"),
 ):
-    node = find_node_by_id(tree_data, node_id)
+    err = require_loaded()
+    if err:
+        return err
+
+    node = find_node_by_id(state["tree_data"], node_id)
     if not node:
         return Response("Node not found", status_code=404)
 
     tips = collect_descendant_tips(node)
-    # Keep tree traversal order; append extra tips at the end
     tip_set = set(tips)
     all_tips = list(tips)
     for t in extra_tips:
@@ -438,6 +607,8 @@ async def export_alignment(
     slice_start = None
     slice_end = None
 
+    protein_seqs = state["protein_seqs"]
+
     if ref_seq and ref_start is not None and ref_end is not None:
         if ref_seq not in protein_seqs:
             return Response(f"Reference sequence '{ref_seq}' not found", status_code=400)
@@ -445,7 +616,7 @@ async def export_alignment(
         if slice_start is None or slice_end is None:
             return Response("Reference positions out of range", status_code=400)
     elif col_start is not None and col_end is not None:
-        slice_start = col_start - 1  # convert 1-indexed to 0-indexed
+        slice_start = col_start - 1
         slice_end = col_end
 
     # Build FASTA
@@ -457,7 +628,6 @@ async def export_alignment(
         if slice_start is not None and slice_end is not None:
             seq = seq[slice_start:slice_end]
         lines.append(f">{tip}")
-        # Wrap at 80 chars
         for i in range(0, len(seq), 80):
             lines.append(seq[i:i + 80])
 

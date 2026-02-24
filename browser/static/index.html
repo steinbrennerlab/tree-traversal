@@ -7,6 +7,36 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+
+<div id="setup-overlay">
+  <div class="setup-dialog">
+    <h2>Tree Browser &mdash; Setup</h2>
+    <p>Provide the path to your input folder:</p>
+    <div class="setup-row">
+      <input type="text" id="setup-path" placeholder="/path/to/input/folder" autofocus>
+      <button id="setup-browse" class="btn">Browse</button>
+      <button id="setup-load" class="btn">Load</button>
+    </div>
+    <div id="setup-error"></div>
+    <div id="setup-browser" style="display:none;">
+      <div class="browser-header">
+        <button id="browser-up" class="btn-sm">&#x2191; Up</button>
+        <span id="browser-current-path" class="browser-path"></span>
+      </div>
+      <div id="browser-valid-indicator" class="browser-valid" style="display:none;">&#x2714; Valid input folder (.nwk + .aa.fa found)</div>
+      <div id="browser-dir-list" class="browser-dir-list"></div>
+      <button id="browser-select" class="btn" disabled>Select this folder</button>
+    </div>
+    <div class="setup-hint">
+      <p>Required folder structure:</p>
+      <pre>  your-folder/
+    *.nwk                &mdash; Newick tree file (exactly one)
+    *.aa.fa              &mdash; Gapped protein alignment (exactly one)
+    orthofinder-input/   &mdash; Folder of per-species FASTA files (optional)</pre>
+    </div>
+  </div>
+</div>
+
 <div id="sidebar">
   <h2>Tree Browser</h2>
 
