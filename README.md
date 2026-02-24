@@ -2,13 +2,61 @@
 
 Interactive phylogenetic tree viewer. Built with FastAPI (Python) and vanilla JS/SVG.
 
+## Installation
+
+The app requires Python 3.10+ with **fastapi** and **uvicorn**.
+
+### Option A: micromamba / conda (recommended)
+
+```bash
+# Install micromamba if you don't have it:
+# Linux/WSL
+curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C ~/.local/bin --strip-components=1 bin/micromamba
+# macOS (Intel)
+curl -Ls https://micro.mamba.pm/api/micromamba/osx-64/latest | tar -xvj -C ~/.local/bin --strip-components=1 bin/micromamba
+# macOS (Apple Silicon)
+curl -Ls https://micro.mamba.pm/api/micromamba/osx-arm64/latest | tar -xvj -C ~/.local/bin --strip-components=1 bin/micromamba
+
+# Create the environment
+micromamba create -f environment.yml -y
+micromamba activate tree-browser
+```
+
+### Option B: pip
+
+```bash
+pip install fastapi uvicorn
+```
+
+### Option C: System packages
+
+**Debian/Ubuntu/WSL:**
+```bash
+sudo apt install python3 python3-pip
+pip install fastapi uvicorn
+```
+
+**macOS (Homebrew):**
+```bash
+brew install python
+pip3 install fastapi uvicorn
+```
+
+**Windows (native):**
+```powershell
+# Install Python from https://www.python.org/downloads/ then:
+pip install fastapi uvicorn
+```
+
 ## Quick Start
 
 ```bash
 cd browser
 ./run.sh
 # or manually:
-micromamba run -n base python3 app.py
+micromamba run -n tree-browser python3 app.py
+# or without micromamba:
+python3 app.py
 ```
 
 Then open http://localhost:8000.
@@ -95,12 +143,13 @@ An example dataset is provided in `example_data/`.
 ## Project Structure
 
 ```
+environment.yml     # Conda/micromamba environment spec
 browser/
-  app.py          # FastAPI backend
-  run.sh          # Launch script
+  app.py            # FastAPI backend
+  run.sh            # Launch script
   static/
-    index.html    # Single-page app
-    app.js        # All client-side logic
-    style.css     # Styling
+    index.html      # Single-page app
+    app.js          # All client-side logic
+    style.css       # Styling
 example_data/       # Example tree, alignment, and species data
 ```
