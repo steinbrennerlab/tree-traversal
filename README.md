@@ -9,17 +9,13 @@ A lightweight, local-first phylogenetic tree viewer with built-in sequence tools
 | Feature | PhyloScope | iTOL | FigTree | ETE Toolkit | Dendroscope |
 |---|---|---|---|---|---|
 | Hosting | Local, self-hosted | Cloud (freemium) | Desktop (Java) | Python library | Desktop (Java) |
-| Setup | `pip install` + run | Account signup | Download JAR | `pip install` | Download installer |
-| Privacy | All data stays local | Data uploaded | Local | Local | Local |
-| Layouts | Rectangular, circular, unrooted | Rectangular, circular, unrooted + more | Rectangular, circular, radial | All major layouts | Rectangular, circular, radial, slanted, unrooted |
-| Species coloring | Built-in from FASTA filenames | Manual annotation files | Manual | Programmatic | Manual node/edge formatting |
+| Species coloring | Built-in from FASTA inputs | Manual annotation files | Manual | Programmatic | Manual node/edge formatting |
 | Motif search | Regex + PROSITE, multi-motif with per-motif colors | No | No | Programmatic | No |
 | Shared node finding | Built-in species filter with exclusion | No | No | Scriptable | No |
 | Alignment export | Click-to-copy FASTA, subtree slicing, column ranges | No | No | Scriptable | No |
 | Click-to-copy | Tip FASTA + node aligned FASTA to clipboard | No | No | No | No |
 | Annotation | Species, bootstrap, motif highlights, sequence lengths | Very rich (heatmaps, domains, bars) | Moderate | Very rich | Basic (colors, fonts, line widths) |
 | Large trees (10k+) | Fast mode: batched SVG, auto-collapse, render cache | Optimized for large trees | Moderate | Good | Optimized (magnifier tool) |
-| Networks | No | No | No | Yes | Yes (rooted phylogenetic networks) |
 
 ## Installation
 
