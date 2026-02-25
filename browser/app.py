@@ -399,6 +399,89 @@ def find_node_by_id(node, target_id):
     return None
 
 
+def reroot_tree(tree_data, target_id):
+    """Re-root the tree at the node with the given ID.
+
+    Returns the new root node, or None if target_id not found.
+    """
+    global _node_counter
+
+    if tree_data["id"] == target_id:
+        return tree_data  # already the root — no-op
+
+    # Build parent map and find path from root to target
+    parent_map = {}  # child_id → parent_node
+
+    def build_parent_map(node):
+        for c in node["children"]:
+            parent_map[c["id"]] = node
+            build_parent_map(c)
+
+    build_parent_map(tree_data)
+
+    # Find target node
+    target = find_node_by_id(tree_data, target_id)
+    if target is None:
+        return None
+
+    # Build path from target back to root
+    path = [target]
+    cur = target
+    while cur["id"] in parent_map:
+        cur = parent_map[cur["id"]]
+        path.append(cur)
+    # path is [target, ..., root]
+
+    # Save original branch lengths before modifying
+    orig_bls = [node["branch_length"] for node in path]
+
+    # Reverse parent-child relationships along the path
+    for i in range(len(path) - 1):
+        child = path[i]
+        parent = path[i + 1]
+        # Remove child from parent's children
+        parent["children"] = [c for c in parent["children"] if c["id"] != child["id"]]
+        # Add parent as child of child
+        child["children"].append(parent)
+
+    # Fix branch lengths: original edge path[i+1]→path[i] had length orig_bls[i]
+    # In the reversed tree, path[i]→path[i+1] keeps that same length
+    for i in range(len(path) - 1):
+        path[i + 1]["branch_length"] = orig_bls[i]
+    target["branch_length"] = 0.0
+
+    # Collapse degree-2 old root if needed (now at end of path)
+    old_root = path[-1]
+    if len(old_root["children"]) == 1:
+        only_child = old_root["children"][0]
+        only_child["branch_length"] += old_root["branch_length"]
+        # If old_root had support, transfer to child if child has none
+        if old_root.get("support") is not None and only_child.get("support") is None:
+            only_child["support"] = old_root["support"]
+        # Replace old_root with only_child in its parent
+        # The parent of old_root in the new tree is path[-2]
+        if len(path) >= 2:
+            new_parent = path[-2]
+            new_parent["children"] = [
+                only_child if c["id"] == old_root["id"] else c
+                for c in new_parent["children"]
+            ]
+
+    # Re-assign IDs to the whole tree
+    _node_counter = 0
+
+    def reassign_ids(node):
+        global _node_counter
+        node["id"] = _node_counter
+        _node_counter += 1
+        for c in node["children"]:
+            reassign_ids(c)
+
+    reassign_ids(target)
+
+    return target
+
+
 def collect_descendant_tips(node):
     """Collect all descendant tip names from a node."""
     if not node["children"]:
@@ -582,6 +665,31 @@ async def api_reset():
         "aa_name": None,
     })
     return {"ok": True}
+
+
+@app.post("/api/reroot")
+async def api_reroot(request: Request):
+    """Re-root the tree at the specified node."""
+    err = require_loaded()
+    if err:
+        return err
+    body = await request.json()
+    node_id = body.get("node_id")
+    if node_id is None:
+        return JSONResponse(status_code=400, content={"error": "node_id is required"})
+
+    new_root = reroot_tree(state["tree_data"], int(node_id))
+    if new_root is None:
+        return JSONResponse(status_code=404, content={"error": "Node not found"})
+
+    # Re-annotate species if mapping exists
+    if state["tip_to_species"]:
+        annotate_species(new_root, state["tip_to_species"])
+
+    state["tree_data"] = new_root
+    state["tree_json"] = tree_to_json(new_root)
+
+    return {"tree": state["tree_json"]}
 
 
 @app.get("/api/tree")

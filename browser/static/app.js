@@ -136,6 +136,41 @@ function openSubtree(nodeId) {
   renderTree();
 }
 
+async function rerootAt(nodeId) {
+  try {
+    const resp = await fetch("/api/reroot", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({node_id: nodeId}),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      tooltip.textContent = `Re-root failed: ${data.error}`;
+      tooltip.style.display = "block";
+      return;
+    }
+    treeData = data.tree;
+    nodeById = {};
+    indexNodes(treeData);
+    collapsedNodes.clear();
+    selectedTip = null;
+    exportNodeId = null;
+    fullTreeData = null;
+    invalidateRenderCache();
+    scale = 1; tx = 20; ty = 20;
+    document.getElementById("subtree-bar").style.display = "none";
+    document.getElementById("sidebar-back-full-tree").style.display = "none";
+    document.getElementById("export-form").style.display = "none";
+    document.getElementById("newick-form").style.display = "none";
+    renderTree();
+    tooltip.textContent = "Tree re-rooted";
+    tooltip.style.display = "block";
+  } catch (e) {
+    tooltip.textContent = "Re-root failed";
+    tooltip.style.display = "block";
+  }
+}
+
 function restoreFullTree() {
   treeData = fullTreeData;
   fullTreeData = null;
@@ -252,13 +287,13 @@ function applyFastaState() {
     showLengths = false;
     exportInfo.textContent = "No alignment loaded";
     exportForm.style.display = "none";
-    subtreeHint.innerHTML = "Click: select node<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation";
+    subtreeHint.innerHTML = "Click: select node<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation<br>Ctrl+Shift+click: re-root at node";
   } else {
     motifInput.disabled = false;
     motifSearch.disabled = false;
     motifType.disabled = false;
     lengthToggle.disabled = false;
-    subtreeHint.innerHTML = "Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation";
+    subtreeHint.innerHTML = "Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation<br>Ctrl+Shift+click: re-root at node";
   }
 }
 
@@ -1381,6 +1416,11 @@ function onTreeClick(e) {
   // Tip click — copy ungapped FASTA to clipboard (if alignment loaded)
   const tipName = el.dataset?.tip;
   if (tipName) {
+    if (e.ctrlKey && e.shiftKey) {
+      const node = Object.values(nodeById).find(n => n.name === tipName);
+      if (node) rerootAt(node.id);
+      return;
+    }
     if (hasFasta) copyTipFasta(tipName);
     return;
   }
@@ -1388,6 +1428,10 @@ function onTreeClick(e) {
   const nodeId = el.dataset?.nodeid;
   if (nodeId != null) {
     const nid = +nodeId;
+    if (e.ctrlKey && e.shiftKey) {
+      rerootAt(nid);
+      return;
+    }
     if (e.ctrlKey) {
       openSubtree(nid);
       return;
