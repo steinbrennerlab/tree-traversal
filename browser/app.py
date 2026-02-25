@@ -568,6 +568,27 @@ async def node_tips(node_id: int = Query(..., description="Node ID")):
     return {"tips": tips}
 
 
+@app.get("/api/tip-lengths")
+async def tip_lengths():
+    """Return ungapped sequence lengths for all tips."""
+    err = require_loaded()
+    if err:
+        return err
+    return {k: len(v) for k, v in state["protein_seqs_ungapped"].items()}
+
+
+@app.get("/api/tip-seq")
+async def tip_seq(name: str = Query(..., description="Tip name")):
+    """Return the ungapped sequence for a single tip."""
+    err = require_loaded()
+    if err:
+        return err
+    seq = state["protein_seqs_ungapped"].get(name)
+    if seq is None:
+        return JSONResponse(status_code=404, content={"error": f"Tip '{name}' not found"})
+    return {"name": name, "seq": seq}
+
+
 @app.get("/api/tip-names")
 async def tip_names():
     """Return all tip names for autocomplete."""

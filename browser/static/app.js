@@ -12,6 +12,10 @@ let motifMatches = new Set();
 let sharedNodes = new Set();
 let collapsedNodes = new Set();  // node IDs that are collapsed
 let nodeById = {};          // id → node ref
+let tipLengths = {};        // tipName → ungapped aa length
+let selectedNodeTips = [];  // tips under the currently shift-clicked node
+let motifList = [];         // [{pattern, type, tipNames, color}]
+let showLengths = false;
 let usePhylogram = true;
 let tipSpacing = 16;
 let layoutMode = "rectangular";  // "rectangular" | "circular" | "unrooted"
@@ -44,6 +48,44 @@ const PALETTE = [
   "#9b59b6","#1abc9c","#34495e","#e67e22","#3498db",
   "#2ecc71","#e91e63","#00bcd4","#ff9800","#795548",
 ];
+
+// ---------------------------------------------------------------------------
+// Motif color palette (distinct from species palette)
+// ---------------------------------------------------------------------------
+const MOTIF_PALETTE = [
+  "#e22222","#2563eb","#16a085","#e67e22","#8e44ad",
+  "#c0392b","#27ae60","#d35400","#2980b9","#f39c12",
+];
+
+function getMotifColors(tipName) {
+  // Return array of colors from all motif entries that match this tip
+  const colors = [];
+  for (const entry of motifList) {
+    if (entry.tipNames.includes(tipName)) colors.push(entry.color);
+  }
+  return colors;
+}
+
+function drawMotifPie(fragments, cx, cy, r, colors) {
+  // Draw a pie-chart circle split evenly among the given colors
+  if (colors.length === 1) {
+    fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${colors[0]}" class="tip-dot motif-match"/>`);
+    return;
+  }
+  const n = colors.length;
+  for (let i = 0; i < n; i++) {
+    const a0 = (2 * Math.PI * i / n) - Math.PI / 2;
+    const a1 = (2 * Math.PI * (i + 1) / n) - Math.PI / 2;
+    const x0 = cx + r * Math.cos(a0);
+    const y0 = cy + r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1);
+    const y1 = cy + r * Math.sin(a1);
+    const large = (a1 - a0 > Math.PI) ? 1 : 0;
+    fragments.push(
+      `<path d="M${cx},${cy} L${x0},${y0} A${r},${r} 0 ${large},1 ${x1},${y1} Z" fill="${colors[i]}" class="tip-dot motif-match"/>`
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -103,12 +145,14 @@ function getNodeColor(node, checkedSpecies) {
 // Init
 // ---------------------------------------------------------------------------
 async function init() {
-  const [treeResp, speciesResp] = await Promise.all([
+  const [treeResp, speciesResp, lengthsResp] = await Promise.all([
     fetch("/api/tree").then(r => r.json()),
     fetch("/api/species").then(r => r.json()),
+    fetch("/api/tip-lengths").then(r => r.json()),
   ]);
   treeData = treeResp;
   speciesMap = speciesResp.species_to_tips;
+  tipLengths = lengthsResp;
 
   for (const [sp, tips] of Object.entries(speciesMap)) {
     for (const t of tips) tipToSpecies[t] = sp;
@@ -118,6 +162,14 @@ async function init() {
   speciesList.forEach((sp, i) => { speciesColors[sp] = PALETTE[i % PALETTE.length]; });
 
   indexNodes(treeData);
+
+  // Auto-hide tip labels for large trees
+  const totalTips = countAllTips(treeData);
+  if (totalTips > 1000) {
+    showTipLabels = false;
+    document.getElementById("tip-labels-toggle").checked = false;
+  }
+
   buildSpeciesList(speciesList);
   buildExcludeSpeciesList(speciesList);
   setupControls();
@@ -186,6 +238,10 @@ function setupControls() {
     showBootstraps = e.target.checked;
     renderTree();
   });
+  document.getElementById("length-toggle").addEventListener("change", e => {
+    showLengths = e.target.checked;
+    renderTree();
+  });
   document.getElementById("uniform-triangles-toggle").addEventListener("change", e => {
     uniformTriangles = e.target.checked;
     renderTree();
@@ -223,6 +279,30 @@ function setupControls() {
   document.getElementById("motif-input").addEventListener("keydown", e => {
     if (e.key === "Enter") searchMotif();
   });
+  const motifTypeEl = document.getElementById("motif-type");
+  const motifInputEl = document.getElementById("motif-input");
+  const motifHintEl = document.getElementById("motif-hint");
+  function updateMotifPlaceholder() {
+    if (motifTypeEl.value === "prosite") {
+      motifInputEl.placeholder = "e.g. C-x(2,4)-C-x(3)-[LIVMFYWC]";
+      motifHintEl.innerHTML =
+        '<b>x</b> — any amino acid<br>' +
+        '<b>[LIVM]</b> — one of L, I, V, or M<br>' +
+        '<b>{PC}</b> — any AA except P or C<br>' +
+        '<b>x(3)</b> — exactly 3 of any AA<br>' +
+        '<b>x(2,4)</b> — 2 to 4 of any AA';
+    } else {
+      motifInputEl.placeholder = "e.g. L.{2}L[KR] or C\\w{2,4}C";
+      motifHintEl.innerHTML =
+        '<b>.</b> — any amino acid<br>' +
+        '<b>[KR]</b> — K or R<br>' +
+        '<b>[^PC]</b> — any AA except P or C<br>' +
+        '<b>.{3}</b> — exactly 3 of any AA<br>' +
+        '<b>.{2,4}</b> — 2 to 4 of any AA';
+    }
+  }
+  motifTypeEl.addEventListener("change", updateMotifPlaceholder);
+  updateMotifPlaceholder();
 
   // Shared nodes
   document.getElementById("highlight-shared").addEventListener("click", highlightSharedNodes);
@@ -300,19 +380,113 @@ async function searchMotif() {
   const type = document.getElementById("motif-type").value;
   const resp = await fetch(`/api/motif?pattern=${encodeURIComponent(pattern)}&type=${type}`);
   const data = await resp.json();
-  motifMatches = new Set(data.matched_tips || []);
   const el = document.getElementById("motif-result");
   if (data.error) {
     el.textContent = data.error;
-  } else {
-    el.textContent = `${motifMatches.size} tips matched`;
+    return;
   }
+  const tipNames = data.matched_tips || [];
+  const color = MOTIF_PALETTE[motifList.length % MOTIF_PALETTE.length];
+  motifList.push({ pattern, type, tipNames, color });
+  rebuildMotifMatches();
+  buildMotifList();
+  el.textContent = `${tipNames.length} tips matched`;
   renderTree();
+}
+
+function rebuildMotifMatches() {
+  motifMatches = new Set();
+  for (const entry of motifList) {
+    for (const t of entry.tipNames) motifMatches.add(t);
+  }
+}
+
+function buildMotifList() {
+  const container = document.getElementById("motif-list");
+  container.innerHTML = "";
+  for (let i = 0; i < motifList.length; i++) {
+    const entry = motifList[i];
+    const row = document.createElement("div");
+    row.className = "motif-entry";
+
+    const swatch = document.createElement("span");
+    swatch.className = "motif-swatch";
+    swatch.style.background = entry.color;
+
+    const pat = document.createElement("span");
+    pat.className = "motif-pattern";
+    pat.textContent = entry.pattern;
+    pat.title = entry.pattern;
+
+    const count = document.createElement("span");
+    count.className = "motif-count";
+    count.textContent = `${entry.tipNames.length} total`;
+
+    row.append(swatch, pat, count);
+
+    // Per-node count and matching names if a node is selected
+    let inNodeTips = [];
+    if (selectedNodeTips.length > 0) {
+      const nodeSet = new Set(selectedNodeTips);
+      inNodeTips = entry.tipNames.filter(t => nodeSet.has(t));
+      const nodeCount = document.createElement("span");
+      nodeCount.className = "motif-node-count";
+      nodeCount.textContent = `${inNodeTips.length} in node`;
+      row.appendChild(nodeCount);
+    }
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "motif-remove";
+    removeBtn.textContent = "\u00d7";
+    removeBtn.title = "Remove";
+    removeBtn.addEventListener("click", () => {
+      motifList.splice(i, 1);
+      rebuildMotifMatches();
+      buildMotifList();
+      renderTree();
+    });
+    row.appendChild(removeBtn);
+
+    container.appendChild(row);
+
+    // Show first 10 matching tip names under this entry when a node is selected
+    if (inNodeTips.length > 0) {
+      const tipsList = document.createElement("div");
+      tipsList.className = "motif-tips-list";
+      const shown = inNodeTips.slice(0, 10);
+      tipsList.textContent = shown.join("\n") + (inNodeTips.length > 10 ? `\n... and ${inNodeTips.length - 10} more` : "");
+      container.appendChild(tipsList);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Shared nodes highlighting
 // ---------------------------------------------------------------------------
+function updateSpeciesCounts() {
+  const labels = document.querySelectorAll("#species-list label");
+  const counts = {};
+  for (const tip of selectedNodeTips) {
+    const sp = tipToSpecies[tip];
+    if (sp) counts[sp] = (counts[sp] || 0) + 1;
+  }
+  for (const label of labels) {
+    const cb = label.querySelector("input");
+    const sp = cb.dataset.species;
+    let badge = label.querySelector(".sp-count");
+    if (selectedNodeTips.length > 0 && counts[sp]) {
+      if (!badge) {
+        badge = document.createElement("span");
+        badge.className = "sp-count";
+        label.appendChild(badge);
+      }
+      badge.textContent = counts[sp];
+    } else if (badge) {
+      badge.remove();
+    }
+  }
+}
+
 async function highlightSharedNodes() {
   const checked = [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species);
   if (checked.length === 0) {
@@ -590,10 +764,13 @@ function renderUnrooted(fragments, checkedSpecies) {
 // Shared drawing helpers
 // ===========================================================================
 function drawNodeDot(fragments, cx, cy, node) {
+  const isSelected = node.id === exportNodeId;
   const isShared = sharedNodes.has(node.id);
-  const r = isShared ? 5 : 3;
+  const r = isSelected ? 6 : isShared ? 5 : 3;
+  const fill = isSelected ? '#000' : isShared ? '#ff6600' : '#999';
+  const cls = isSelected ? 'node-dot selected-node' : isShared ? 'node-dot shared-node' : 'node-dot';
   fragments.push(
-    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${isShared ? '#ff6600' : '#999'}" class="node-dot ${isShared ? 'shared-node' : ''}"
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" class="${cls}"
       data-nodeid="${node.id}"
       ${node.sup != null ? `data-support="${node.sup}"` : ""}/>`
   );
@@ -608,8 +785,15 @@ function drawTipDot(fragments, cx, cy, node, checkedSpecies) {
   const isMotif = motifMatches.has(node.name);
   const isName = nameMatches.has(node.name);
   const spColor = getNodeColor(node, checkedSpecies);
-  const color = isMotif ? "#e22" : isName ? "#2563eb" : spColor;
   const r = (isMotif || isName || spColor !== "#333") ? 3 : 2;
+  if (isMotif) {
+    const colors = getMotifColors(node.name);
+    if (colors.length > 0) {
+      drawMotifPie(fragments, cx, cy, r, colors);
+      return;
+    }
+  }
+  const color = isName ? "#2563eb" : spColor;
   fragments.push(
     `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" class="tip-dot"
       data-tip="${node.name}" data-species="${node.sp || ''}"/>`
@@ -620,15 +804,18 @@ function drawTipLabel(fragments, x, y, rotation, node, checkedSpecies) {
   const isMotif = motifMatches.has(node.name);
   const isName = nameMatches.has(node.name);
   const highlight = isMotif || isName;
-  const color = isMotif ? "#e22" : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
+  const motifColors = isMotif ? getMotifColors(node.name) : [];
+  const color = isMotif && motifColors.length > 0 ? motifColors[0] : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
   const bold = highlight ? ' font-weight="bold"' : "";
   const transform = rotation ? ` transform="rotate(${rotation},${x},${y})"` : "";
+  let label = node.name;
+  if (showLengths && tipLengths[node.name] != null) label += ` (${tipLengths[node.name]} aa)`;
   fragments.push(
     `<text x="${x}" y="${y}" class="tip-label" fill="${color}"${bold}${transform}
-      data-tip="${node.name}" data-species="${node.sp || ''}">${node.name}</text>`
+      data-tip="${node.name}" data-species="${node.sp || ''}">${label}</text>`
   );
-  if (isMotif) {
-    fragments.push(`<circle cx="${x - 4}" cy="${y - 3}" r="3" class="motif-match" fill="#e22"/>`);
+  if (isMotif && motifColors.length > 0) {
+    drawMotifPie(fragments, x - 4, y - 3, 3, motifColors);
   }
   if (isName) {
     fragments.push(`<circle cx="${x - 4}" cy="${y - 3}" r="3" fill="#2563eb" stroke="#1d4ed8" stroke-width="1"/>`);
@@ -639,18 +826,21 @@ function drawTipLabelRadial(fragments, x, y, angleDeg, anchor, node, checkedSpec
   const isMotif = motifMatches.has(node.name);
   const isName = nameMatches.has(node.name);
   const highlight = isMotif || isName;
-  const color = isMotif ? "#e22" : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
+  const motifColors = isMotif ? getMotifColors(node.name) : [];
+  const color = isMotif && motifColors.length > 0 ? motifColors[0] : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
   const bold = highlight ? ' font-weight="bold"' : "";
+  let label = node.name;
+  if (showLengths && tipLengths[node.name] != null) label += ` (${tipLengths[node.name]} aa)`;
   fragments.push(
     `<text x="${x}" y="${y}" class="tip-label" fill="${color}"${bold}
       text-anchor="${anchor}" transform="rotate(${angleDeg},${x},${y})"
-      data-tip="${node.name}" data-species="${node.sp || ''}">${node.name}</text>`
+      data-tip="${node.name}" data-species="${node.sp || ''}">${label}</text>`
   );
-  if (isMotif) {
+  if (isMotif && motifColors.length > 0) {
     const rad = angleDeg * Math.PI / 180;
     const mx = x - 6 * Math.cos(rad);
     const my = y - 6 * Math.sin(rad);
-    fragments.push(`<circle cx="${mx}" cy="${my}" r="3" class="motif-match" fill="#e22"/>`);
+    drawMotifPie(fragments, mx, my, 3, motifColors);
   }
   if (isName) {
     const rad = angleDeg * Math.PI / 180;
@@ -665,32 +855,85 @@ function drawTipLabelRadial(fragments, x, y, angleDeg, anchor, node, checkedSpec
 // ---------------------------------------------------------------------------
 function onTreeClick(e) {
   const el = e.target;
+
+  // Tip click — copy ungapped FASTA to clipboard
+  const tipName = el.dataset?.tip;
+  if (tipName) {
+    copyTipFasta(tipName);
+    return;
+  }
+
   const nodeId = el.dataset?.nodeid;
   if (nodeId != null) {
     const nid = +nodeId;
-    if (e.shiftKey) {
-      openExportPanel(nid);
-      return;
-    }
     if (e.ctrlKey) {
       openSubtree(nid);
       return;
     }
-    if (collapsedNodes.has(nid)) collapsedNodes.delete(nid);
-    else collapsedNodes.add(nid);
-    renderTree();
+    if (e.shiftKey) {
+      if (collapsedNodes.has(nid)) collapsedNodes.delete(nid);
+      else collapsedNodes.add(nid);
+      renderTree();
+      return;
+    }
+    // Plain click — select node, copy aligned FASTA
+    openExportPanel(nid);
+    copyNodeFasta(nid);
   }
+}
+
+async function copyNodeFasta(nodeId) {
+  try {
+    const resp = await fetch(`/api/export?node_id=${nodeId}`);
+    const fasta = await resp.text();
+    await navigator.clipboard.writeText(fasta);
+    tooltip.textContent = `Aligned FASTA copied (node #${nodeId})`;
+    tooltip.style.display = "block";
+  } catch (e) {
+    tooltip.textContent = "Copy failed";
+    tooltip.style.display = "block";
+  }
+}
+
+async function copyTipFasta(tipName) {
+  try {
+    const resp = await fetch(`/api/tip-seq?name=${encodeURIComponent(tipName)}`);
+    const data = await resp.json();
+    if (data.error) return;
+    const fasta = `>${data.name}\n${data.seq}`;
+    await navigator.clipboard.writeText(fasta);
+    tooltip.textContent = "Copied to clipboard!";
+  } catch (e) {
+    tooltip.textContent = "Copy failed";
+  }
+}
+
+function buildTipTooltip(tipName, species) {
+  const lines = [tipName];
+  lines.push(`Species: ${species || "unknown"}`);
+  const len = tipLengths[tipName];
+  if (len != null) lines.push(`Length: ${len} aa`);
+  // Matching motifs
+  const matching = motifList.filter(m => m.tipNames.includes(tipName));
+  if (matching.length > 0) {
+    lines.push(`Motifs: ${matching.map(m => m.pattern).join(", ")}`);
+  }
+  lines.push("Click to copy FASTA");
+  return lines.join("\n");
 }
 
 function onTreeHover(e) {
   const el = e.target;
   if (el.dataset?.tip) {
-    tooltip.textContent = `${el.dataset.tip}\nSpecies: ${el.dataset.species || "unknown"}`;
+    tooltip.textContent = buildTipTooltip(el.dataset.tip, el.dataset.species);
     tooltip.style.display = "block";
     tooltip.style.left = (e.clientX + 12) + "px";
     tooltip.style.top = (e.clientY - 10) + "px";
-  } else if (el.dataset?.support != null) {
-    tooltip.textContent = `Support: ${el.dataset.support}`;
+  } else if (el.dataset?.nodeid != null) {
+    let text = `Node #${el.dataset.nodeid}`;
+    if (el.dataset.support != null) text += `\nSupport: ${el.dataset.support}`;
+    text += "\nClick: select & copy FASTA\nShift+click: collapse/expand\nCtrl+click: view subtree";
+    tooltip.textContent = text;
     tooltip.style.display = "block";
     tooltip.style.left = (e.clientX + 12) + "px";
     tooltip.style.top = (e.clientY - 10) + "px";
@@ -707,6 +950,11 @@ async function openExportPanel(nodeId) {
   const resp = await fetch(`/api/node-tips?node_id=${nodeId}`);
   const data = await resp.json();
   const tips = data.tips || [];
+  selectedNodeTips = tips;
+
+  updateSpeciesCounts();
+  buildMotifList();  // refresh per-node counts
+  renderTree();      // re-render to show selected node dot
 
   document.getElementById("export-info").textContent =
     `Node #${nodeId} — ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;

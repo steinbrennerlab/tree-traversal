@@ -50,6 +50,7 @@
     <div><label><input type="checkbox" id="phylogram-toggle" checked> Use branch lengths</label></div>
     <div><label><input type="checkbox" id="tip-labels-toggle" checked> Show tip labels</label></div>
     <div><label><input type="checkbox" id="bootstrap-toggle"> Show bootstraps</label></div>
+    <div><label><input type="checkbox" id="length-toggle"> Show sequence lengths</label></div>
     <div><label><input type="checkbox" id="uniform-triangles-toggle"> Uniform collapsed triangles</label></div>
     <div class="row">
       <label>Triangle size: <input type="range" id="triangle-size" min="10" max="500" value="100"></label>
@@ -61,7 +62,7 @@
 
   <div class="section">
     <h3>Subtree Focus</h3>
-    <p class="hint">Ctrl+click an internal node to view its subtree in isolation.</p>
+    <p class="hint">Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation</p>
     <button id="sidebar-back-full-tree" class="btn" style="display:none;">Back to full tree</button>
   </div>
 
@@ -93,10 +94,12 @@
       </select>
     </div>
     <div class="row">
-      <input type="text" id="motif-input" placeholder="e.g. LRR or L-x-x-L">
+      <input type="text" id="motif-input" placeholder="e.g. L.{2}L[KR] or C\\w{2,4}C">
       <button id="motif-search" class="btn">Search</button>
     </div>
+    <div id="motif-hint" class="hint"></div>
     <div id="motif-result"></div>
+    <div id="motif-list"></div>
   </div>
 
   <div class="section">
@@ -125,7 +128,7 @@
 
   <div class="section" id="export-section">
     <h3>Export Alignment</h3>
-    <div id="export-info" class="hint">Shift-click a node to select</div>
+    <div id="export-info" class="hint">Click a node to select &amp; copy FASTA</div>
     <div id="export-form" style="display:none;">
     <details class="export-tips-details">
       <summary id="export-tips-summary">Tip names</summary>

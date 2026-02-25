@@ -11,7 +11,7 @@ body { display: flex; height: 100vh; font-family: system-ui, sans-serif; font-si
 .row { margin-bottom: 6px; display: flex; gap: 6px; align-items: center; }
 .hint { font-size: 11px; color: #888; margin-bottom: 4px; }
 
-#species-list { max-height: 240px; overflow-y: auto; }
+#species-list { max-height: 240px; overflow-y: auto; padding-right: 6px; }
 #species-list label { display: flex; align-items: center; gap: 4px; padding: 1px 0; cursor: pointer; font-size: 12px; }
 .sp-swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
 
@@ -42,7 +42,7 @@ input[type=text] { flex: 1; }
 
 .exclude-section { margin-top: 8px; }
 .exclude-section summary { font-size: 12px; cursor: pointer; color: #666; }
-#exclude-species-list { max-height: 180px; overflow-y: auto; margin-top: 4px; }
+#exclude-species-list { max-height: 180px; overflow-y: auto; margin-top: 4px; padding-right: 6px; }
 #exclude-species-list label { display: flex; align-items: center; gap: 4px; padding: 1px 0; cursor: pointer; font-size: 12px; }
 
 /* Export panel */
@@ -197,3 +197,26 @@ input[type=text] { flex: 1; }
   line-height: 1.5;
   margin: 0;
 }
+
+/* Species count badges */
+.sp-count { font-size: 11px; color: #888; margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* Motif running list */
+#motif-list { margin-top: 6px; }
+.motif-entry {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 12px; padding: 2px 0; border-bottom: 1px solid #eee;
+}
+.motif-entry .motif-pattern { flex: 1; font-family: monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.motif-entry .motif-count { font-size: 11px; color: #666; white-space: nowrap; }
+.motif-entry .motif-node-count { font-size: 11px; color: #2563eb; white-space: nowrap; }
+.motif-remove {
+  background: none; border: none; cursor: pointer; color: #c0392b;
+  font-size: 14px; line-height: 1; padding: 0 2px; flex-shrink: 0;
+}
+.motif-remove:hover { color: #e74c3c; }
+.motif-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+.motif-tips-list { font-size: 11px; font-family: monospace; white-space: pre; color: #555; margin: 2px 0 4px 14px; max-height: 120px; overflow-y: auto; }
+
+/* Selected node dot */
+.selected-node { stroke: #000; stroke-width: 2; }
