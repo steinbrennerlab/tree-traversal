@@ -26,6 +26,7 @@ let triangleScale = 100;         // percentage slider for triangle size (10–20
 let exportNodeId = null;         // currently selected node for export
 let allTipNames = [];            // cached for export validation
 let fullTreeData = null;         // stores the original tree when viewing a subtree
+let hasFasta = false;            // whether alignment data is available
 
 // Pan / zoom state
 let scale = 1, tx = 20, ty = 20;
@@ -145,20 +146,26 @@ function getNodeColor(node, checkedSpecies) {
 // Init
 // ---------------------------------------------------------------------------
 async function init() {
-  const [treeResp, speciesResp, lengthsResp] = await Promise.all([
+  // Fetch status to get has_fasta flag
+  const statusResp = await fetch("/api/status").then(r => r.json());
+  hasFasta = !!statusResp.has_fasta;
+
+  const fetches = [
     fetch("/api/tree").then(r => r.json()),
     fetch("/api/species").then(r => r.json()),
-    fetch("/api/tip-lengths").then(r => r.json()),
-  ]);
-  treeData = treeResp;
-  speciesMap = speciesResp.species_to_tips;
-  tipLengths = lengthsResp;
+  ];
+  if (hasFasta) fetches.push(fetch("/api/tip-lengths").then(r => r.json()));
+
+  const results = await Promise.all(fetches);
+  treeData = results[0];
+  speciesMap = results[1].species_to_tips;
+  tipLengths = hasFasta ? results[2] : {};
 
   for (const [sp, tips] of Object.entries(speciesMap)) {
     for (const t of tips) tipToSpecies[t] = sp;
   }
 
-  const speciesList = speciesResp.species;
+  const speciesList = results[1].species;
   speciesList.forEach((sp, i) => { speciesColors[sp] = PALETTE[i % PALETTE.length]; });
 
   indexNodes(treeData);
@@ -174,7 +181,44 @@ async function init() {
   buildExcludeSpeciesList(speciesList);
   setupControls();
   renderTree();
-  loadTipDatalist();
+  if (hasFasta) {
+    loadTipDatalist();
+  }
+  applyFastaState();
+}
+
+function applyFastaState() {
+  // Disable/enable sequence-dependent UI based on hasFasta
+  const motifInput = document.getElementById("motif-input");
+  const motifSearch = document.getElementById("motif-search");
+  const motifType = document.getElementById("motif-type");
+  const lengthToggle = document.getElementById("length-toggle");
+  const motifHint = document.getElementById("motif-hint");
+  const exportSection = document.getElementById("export-section");
+  const exportInfo = document.getElementById("export-info");
+  const exportForm = document.getElementById("export-form");
+
+  const subtreeHint = document.getElementById("subtree-hint");
+
+  if (!hasFasta) {
+    motifInput.disabled = true;
+    motifSearch.disabled = true;
+    motifType.disabled = true;
+    motifInput.placeholder = "No alignment loaded";
+    motifHint.textContent = "No alignment loaded";
+    lengthToggle.disabled = true;
+    lengthToggle.checked = false;
+    showLengths = false;
+    exportInfo.textContent = "No alignment loaded";
+    exportForm.style.display = "none";
+    subtreeHint.innerHTML = "Click: select node<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation";
+  } else {
+    motifInput.disabled = false;
+    motifSearch.disabled = false;
+    motifType.disabled = false;
+    lengthToggle.disabled = false;
+    subtreeHint.innerHTML = "Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation";
+  }
 }
 
 function indexNodes(node) {
@@ -856,10 +900,10 @@ function drawTipLabelRadial(fragments, x, y, angleDeg, anchor, node, checkedSpec
 function onTreeClick(e) {
   const el = e.target;
 
-  // Tip click — copy ungapped FASTA to clipboard
+  // Tip click — copy ungapped FASTA to clipboard (if alignment loaded)
   const tipName = el.dataset?.tip;
   if (tipName) {
-    copyTipFasta(tipName);
+    if (hasFasta) copyTipFasta(tipName);
     return;
   }
 
@@ -876,9 +920,9 @@ function onTreeClick(e) {
       renderTree();
       return;
     }
-    // Plain click — select node, copy aligned FASTA
+    // Plain click — select node, copy aligned FASTA if available
     openExportPanel(nid);
-    copyNodeFasta(nid);
+    if (hasFasta) copyNodeFasta(nid);
   }
 }
 
@@ -911,14 +955,16 @@ async function copyTipFasta(tipName) {
 function buildTipTooltip(tipName, species) {
   const lines = [tipName];
   lines.push(`Species: ${species || "unknown"}`);
-  const len = tipLengths[tipName];
-  if (len != null) lines.push(`Length: ${len} aa`);
-  // Matching motifs
-  const matching = motifList.filter(m => m.tipNames.includes(tipName));
-  if (matching.length > 0) {
-    lines.push(`Motifs: ${matching.map(m => m.pattern).join(", ")}`);
+  if (hasFasta) {
+    const len = tipLengths[tipName];
+    if (len != null) lines.push(`Length: ${len} aa`);
+    // Matching motifs
+    const matching = motifList.filter(m => m.tipNames.includes(tipName));
+    if (matching.length > 0) {
+      lines.push(`Motifs: ${matching.map(m => m.pattern).join(", ")}`);
+    }
+    lines.push("Click to copy FASTA");
   }
-  lines.push("Click to copy FASTA");
   return lines.join("\n");
 }
 
@@ -932,7 +978,8 @@ function onTreeHover(e) {
   } else if (el.dataset?.nodeid != null) {
     let text = `Node #${el.dataset.nodeid}`;
     if (el.dataset.support != null) text += `\nSupport: ${el.dataset.support}`;
-    text += "\nClick: select & copy FASTA\nShift+click: collapse/expand\nCtrl+click: view subtree";
+    text += hasFasta ? "\nClick: select & copy FASTA" : "\nClick: select node";
+    text += "\nShift+click: collapse/expand\nCtrl+click: view subtree";
     tooltip.textContent = text;
     tooltip.style.display = "block";
     tooltip.style.left = (e.clientX + 12) + "px";
@@ -1068,7 +1115,13 @@ async function browserNavigate(path) {
     browserCurrentPath.textContent = data.current;
     browserUpBtn.disabled = !data.parent;
 
-    const isValid = data.has_nwk && data.has_aa_fa;
+    const isValid = data.has_nwk;
+    const hasAlignment = data.has_nwk && data.has_aa_fa;
+    browserValidIndicator.textContent = hasAlignment
+      ? "\u2714 Valid input folder (.nwk + .aa.fa found)"
+      : data.has_nwk
+        ? "\u2714 Tree found (.nwk) \u2014 no alignment (.aa.fa)"
+        : "";
     browserValidIndicator.style.display = isValid ? "" : "none";
     browserSelectBtn.disabled = !isValid;
 
@@ -1109,8 +1162,53 @@ browserSelectBtn.addEventListener("click", () => {
   if (browserCurrentDir) {
     document.getElementById("setup-path").value = browserCurrentDir;
     browserPanel.style.display = "none";
+    scanFolder(browserCurrentDir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Detected-files auto-scan
+// ---------------------------------------------------------------------------
+const detectedFilesPanel = document.getElementById("detected-files");
+const detectedNwkInput = document.getElementById("detected-nwk");
+const detectedAaInput = document.getElementById("detected-aa");
+const detectedOrthoSpan = document.getElementById("detected-ortho");
+
+async function scanFolder(dirPath) {
+  if (!dirPath) { detectedFilesPanel.style.display = "none"; return; }
+  try {
+    const resp = await fetch(`/api/browse-files?path=${encodeURIComponent(dirPath)}`);
+    if (!resp.ok) { detectedFilesPanel.style.display = "none"; return; }
+    const data = await resp.json();
+    detectedFilesPanel.style.display = "";
+
+    // Pre-fill tree
+    if (data.nwk_files.length > 0) {
+      detectedNwkInput.value = data.nwk_files[0];
+      detectedNwkInput.title = `Available: ${data.nwk_files.join(", ")}`;
+    } else {
+      detectedNwkInput.value = "";
+    }
+
+    // Pre-fill alignment
+    if (data.aa_files.length > 0) {
+      detectedAaInput.value = data.aa_files[0];
+      detectedAaInput.title = `Available: ${data.aa_files.join(", ")}`;
+      detectedAaInput.placeholder = "none found (optional)";
+    } else {
+      detectedAaInput.value = "";
+      detectedAaInput.placeholder = "none found (optional)";
+    }
+
+    // Species mapping status
+    detectedOrthoSpan.textContent = data.has_ortho
+      ? "orthofinder-input/ found \u2713"
+      : "orthofinder-input/ not found";
+    detectedOrthoSpan.style.color = data.has_ortho ? "#27ae60" : "#888";
+  } catch {
+    detectedFilesPanel.style.display = "none";
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Setup flow — check status, show dialog or go straight to init
@@ -1138,11 +1236,20 @@ async function doSetupLoad() {
   setupLoadBtn.disabled = true;
   setupLoadBtn.textContent = "Loading...";
 
+  const payload = { input_dir: inputDir };
+  // Pass explicit file selections if the detected-files panel is visible
+  if (detectedFilesPanel.style.display !== "none") {
+    const nwk = detectedNwkInput.value.trim();
+    const aa = detectedAaInput.value.trim();
+    if (nwk) payload.nwk_file = nwk;
+    payload.aa_file = aa;  // empty string → skip alignment
+  }
+
   try {
     const resp = await fetch("/api/load", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({input_dir: inputDir}),
+      body: JSON.stringify(payload),
     });
     const data = await resp.json();
     if (!resp.ok) {
@@ -1159,9 +1266,31 @@ async function doSetupLoad() {
   }
 }
 
-setupLoadBtn.addEventListener("click", doSetupLoad);
-setupPathInput.addEventListener("keydown", e => {
-  if (e.key === "Enter") doSetupLoad();
+setupLoadBtn.addEventListener("click", async () => {
+  // Ensure detected files are scanned before loading
+  const path = setupPathInput.value.trim();
+  if (path && detectedFilesPanel.style.display === "none") {
+    await scanFolder(path);
+  }
+  doSetupLoad();
+});
+setupPathInput.addEventListener("keydown", async e => {
+  if (e.key === "Enter") {
+    await scanFolder(setupPathInput.value.trim());
+    doSetupLoad();
+  }
+});
+// Trigger scan when path input loses focus
+setupPathInput.addEventListener("blur", () => {
+  scanFolder(setupPathInput.value.trim());
+});
+// Also scan on paste
+setupPathInput.addEventListener("input", () => {
+  // Debounce: only scan after user stops typing for 500ms
+  clearTimeout(setupPathInput._scanTimer);
+  setupPathInput._scanTimer = setTimeout(() => {
+    scanFolder(setupPathInput.value.trim());
+  }, 500);
 });
 
 // On page load: check if data is already loaded

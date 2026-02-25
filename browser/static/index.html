@@ -18,6 +18,23 @@
       <button id="setup-load" class="btn">Load</button>
     </div>
     <div id="setup-error"></div>
+    <div id="detected-files" style="display:none;">
+      <div class="detected-files-header">Detected files:</div>
+      <div class="detected-row">
+        <label class="detected-label">Tree (.nwk):</label>
+        <input type="text" id="detected-nwk" placeholder="(none found)" class="detected-input">
+        <span class="detected-tag detected-required">required</span>
+      </div>
+      <div class="detected-row">
+        <label class="detected-label">Alignment (.aa.fa):</label>
+        <input type="text" id="detected-aa" placeholder="none found (optional)" class="detected-input">
+        <span class="detected-tag detected-optional">optional</span>
+      </div>
+      <div class="detected-row">
+        <label class="detected-label">Species mapping:</label>
+        <span id="detected-ortho" class="detected-status">—</span>
+      </div>
+    </div>
     <div id="setup-browser" style="display:none;">
       <div class="browser-header">
         <button id="browser-up" class="btn-sm">&#x2191; Up</button>
@@ -30,8 +47,8 @@
     <div class="setup-hint">
       <p>Required folder structure:</p>
       <pre>  your-folder/
-    *.nwk                &mdash; Newick tree file (exactly one)
-    *.aa.fa              &mdash; Gapped protein alignment (exactly one)
+    *.nwk                &mdash; Newick tree file (exactly one, required)
+    *.aa.fa              &mdash; Gapped protein alignment (optional)
     orthofinder-input/   &mdash; Folder of per-species FASTA files (optional)</pre>
     </div>
   </div>
@@ -62,7 +79,7 @@
 
   <div class="section">
     <h3>Subtree Focus</h3>
-    <p class="hint">Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation</p>
+    <p class="hint" id="subtree-hint">Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation</p>
     <button id="sidebar-back-full-tree" class="btn" style="display:none;">Back to full tree</button>
   </div>
 

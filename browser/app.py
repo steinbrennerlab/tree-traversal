@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 # ---------------------------------------------------------------------------
 state = {
     "loaded": False,
+    "has_fasta": False,
     "input_dir": None,
     "gene": None,
     "tree_data": None,
@@ -278,8 +279,11 @@ def tree_to_json(node):
 # ---------------------------------------------------------------------------
 # Load data from an input directory
 # ---------------------------------------------------------------------------
-def load_data(input_dir_str):
-    """Auto-detect files in input_dir, parse tree + alignment + species.
+def load_data(input_dir_str, nwk_file=None, aa_file=None):
+    """Load tree + alignment + species from input_dir.
+
+    If nwk_file/aa_file are given (filenames relative to input_dir), use them
+    directly.  Otherwise auto-detect by glob pattern.
 
     Returns (success: bool, error_message: str | None).
     """
@@ -294,21 +298,33 @@ def load_data(input_dir_str):
     if not input_dir.is_dir():
         return False, f"Directory not found: {input_dir}"
 
-    # Auto-detect .nwk file
-    nwk_files = list(input_dir.glob("*.nwk"))
-    if len(nwk_files) == 0:
-        return False, f"No .nwk file found in {input_dir}"
-    if len(nwk_files) > 1:
-        return False, f"Multiple .nwk files found in {input_dir}: {[f.name for f in nwk_files]}"
-    nwk_file = nwk_files[0]
+    # --- Resolve tree file ---
+    if nwk_file:
+        nwk_path = input_dir / nwk_file
+        if not nwk_path.is_file():
+            return False, f"Tree file not found: {nwk_path}"
+    else:
+        nwk_files = list(input_dir.glob("*.nwk"))
+        if len(nwk_files) == 0:
+            return False, f"No .nwk file found in {input_dir}"
+        if len(nwk_files) > 1:
+            return False, f"Multiple .nwk files found in {input_dir}: {[f.name for f in nwk_files]}"
+        nwk_path = nwk_files[0]
 
-    # Auto-detect *.aa.fa file
-    aa_files = list(input_dir.glob("*.aa.fa"))
-    if len(aa_files) == 0:
-        return False, f"No *.aa.fa file found in {input_dir}"
-    if len(aa_files) > 1:
-        return False, f"Multiple *.aa.fa files found in {input_dir}: {[f.name for f in aa_files]}"
-    aa_file = aa_files[0]
+    # --- Resolve alignment file ---
+    if aa_file is not None:
+        # Explicit: empty string means skip alignment
+        aa_path = (input_dir / aa_file) if aa_file else None
+        if aa_path and not aa_path.is_file():
+            return False, f"Alignment file not found: {aa_path}"
+    else:
+        aa_files = list(input_dir.glob("*.aa.fa"))
+        if len(aa_files) > 1:
+            return False, f"Multiple *.aa.fa files found in {input_dir}: {[f.name for f in aa_files]}"
+        aa_path = aa_files[0] if aa_files else None
+
+    nwk_file = nwk_path  # rename for rest of function
+    aa_file = aa_path
 
     # Derive gene name from .nwk filename (strip extension)
     gene = nwk_file.stem
@@ -322,10 +338,14 @@ def load_data(input_dir_str):
         nwk_string = f.read().strip()
     tree_data = _parse_newick(nwk_string)
 
-    # Parse alignment
-    print(f"Loading protein sequences from {aa_file.name}...")
-    protein_seqs = parse_fasta(str(aa_file))
-    protein_seqs_ungapped = {k: v.replace("-", "") for k, v in protein_seqs.items()}
+    # Parse alignment (if present)
+    if aa_file:
+        print(f"Loading protein sequences from {aa_file.name}...")
+        protein_seqs = parse_fasta(str(aa_file))
+        protein_seqs_ungapped = {k: v.replace("-", "") for k, v in protein_seqs.items()}
+    else:
+        print("No *.aa.fa found, skipping alignment.")
+        protein_seqs, protein_seqs_ungapped = None, None
 
     # Species mapping (optional — skip if orthofinder-input/ missing)
     ortho_dir = input_dir / "orthofinder-input"
@@ -341,8 +361,10 @@ def load_data(input_dir_str):
     tree_json = tree_to_json(tree_data)
 
     # Update global state
+    has_fasta = protein_seqs is not None
     state.update({
         "loaded": True,
+        "has_fasta": has_fasta,
         "input_dir": str(input_dir),
         "gene": gene,
         "tree_data": tree_data,
@@ -351,7 +373,7 @@ def load_data(input_dir_str):
         "protein_seqs_ungapped": protein_seqs_ungapped,
         "species_to_tips": species_to_tips,
         "tip_to_species": tip_to_species,
-        "num_seqs": len(protein_seqs),
+        "num_seqs": len(protein_seqs) if has_fasta else 0,
         "num_species": len(species_to_tips),
     })
 
@@ -465,12 +487,31 @@ async def api_status():
     if state["loaded"]:
         return {
             "loaded": True,
+            "has_fasta": state["has_fasta"],
             "gene": state["gene"],
             "input_dir": state["input_dir"],
             "num_seqs": state["num_seqs"],
             "num_species": state["num_species"],
         }
     return {"loaded": False}
+
+
+@app.get("/api/browse-files")
+async def api_browse_files(path: str = Query(..., description="Directory to scan")):
+    """Scan a directory and return detected input files."""
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    p = Path(path)
+    if not p.is_absolute():
+        p = PROJECT_ROOT / p
+    p = p.resolve()
+    if not p.is_dir():
+        return JSONResponse(status_code=400, content={"error": f"Not a directory: {p}"})
+
+    nwk_files = sorted(f.name for f in p.glob("*.nwk"))
+    aa_files = sorted(f.name for f in p.glob("*.aa.fa"))
+    has_ortho = (p / "orthofinder-input").is_dir()
+
+    return {"nwk_files": nwk_files, "aa_files": aa_files, "has_ortho": has_ortho}
 
 
 @app.post("/api/load")
@@ -480,12 +521,16 @@ async def api_load(request: Request):
     if not input_dir:
         return JSONResponse(status_code=400, content={"error": "input_dir is required"})
 
-    success, error = load_data(input_dir)
+    nwk_file = body.get("nwk_file")  # filename or None
+    aa_file = body.get("aa_file")    # filename, "" to skip, or None
+
+    success, error = load_data(input_dir, nwk_file=nwk_file, aa_file=aa_file)
     if not success:
         return JSONResponse(status_code=400, content={"error": error})
 
     return {
         "loaded": True,
+        "has_fasta": state["has_fasta"],
         "gene": state["gene"],
         "input_dir": state["input_dir"],
         "num_seqs": state["num_seqs"],
@@ -520,6 +565,9 @@ async def search_motif(
     err = require_loaded()
     if err:
         return err
+
+    if not state["has_fasta"]:
+        return {"matched_tips": [], "error": "No alignment loaded"}
 
     if type == "prosite":
         try:
@@ -574,6 +622,8 @@ async def tip_lengths():
     err = require_loaded()
     if err:
         return err
+    if not state["has_fasta"]:
+        return {}
     return {k: len(v) for k, v in state["protein_seqs_ungapped"].items()}
 
 
@@ -583,6 +633,8 @@ async def tip_seq(name: str = Query(..., description="Tip name")):
     err = require_loaded()
     if err:
         return err
+    if not state["has_fasta"]:
+        return JSONResponse(status_code=404, content={"error": "No alignment loaded"})
     seq = state["protein_seqs_ungapped"].get(name)
     if seq is None:
         return JSONResponse(status_code=404, content={"error": f"Tip '{name}' not found"})
@@ -595,6 +647,8 @@ async def tip_names():
     err = require_loaded()
     if err:
         return err
+    if not state["has_fasta"]:
+        return {"tips": []}
     return {"tips": sorted(state["protein_seqs"].keys())}
 
 
@@ -611,6 +665,8 @@ async def export_alignment(
     err = require_loaded()
     if err:
         return err
+    if not state["has_fasta"]:
+        return Response("No alignment loaded", status_code=400)
 
     node = find_node_by_id(state["tree_data"], node_id)
     if not node:
