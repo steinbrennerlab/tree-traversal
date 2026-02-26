@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="PhyloScope" width="200">
+</p>
+
 # PhyloScope
 
 A lightweight, local-first phylogenetic tree viewer with built-in sequence tools. Built with FastAPI (Python) and vanilla JS/SVG.
@@ -14,8 +18,13 @@ A lightweight, local-first phylogenetic tree viewer with built-in sequence tools
 | Shared node finding | Built-in species filter with exclusion | No | No | Scriptable | No |
 | Alignment export | Click-to-copy FASTA, subtree slicing, column ranges | No | No | Scriptable | No |
 | Click-to-copy | Tip FASTA + node aligned FASTA to clipboard | No | No | No | No |
-| Annotation | Species, bootstrap, motif highlights, sequence lengths | Very rich (heatmaps, domains, bars) | Moderate | Very rich | Basic (colors, fonts, line widths) |
+| Annotation | Species, bootstrap, motif highlights, sequence lengths, clade labels | Very rich (heatmaps, domains, bars) | Moderate | Very rich | Basic (colors, fonts, line widths) |
 | Large trees (10k+) | Fast mode: batched SVG, auto-collapse, render cache | Optimized for large trees | Moderate | Good | Optimized (magnifier tool) |
+| Undo/redo | Full undo/redo for tree operations | No | Limited | No | No |
+| Session persistence | Save/load all UI state to JSON | Server-side projects | Save to NEXUS | Scriptable | Save to file |
+| Tip filtering | Regex and species-based hide/show | Dataset filtering | Taxon filtering | Programmatic | Find/filter |
+| Pairwise comparison | Patristic distance + sequence identity | No | No | Programmatic | No |
+| PDF export | Vector PDF via jsPDF/svg2pdf | PNG/SVG/PDF | PDF/SVG/PNG | PNG/SVG/PDF | PDF/SVG/PNG |
 
 ## Installation
 
@@ -80,6 +89,8 @@ Then open http://localhost:8000.
 
 On launch, a setup dialog prompts for an input folder path. You can type a path directly or click **Browse** to navigate the filesystem visually. The browser shows a green checkmark when the current directory contains valid input files, and the **Select** button fills the path for you.
 
+You can also click **Load saved session** to restore a previously saved session file, which automatically loads the original data folder and restores all UI state.
+
 ## Input Folder Structure
 
 Point PhyloScope at any folder containing:
@@ -87,7 +98,7 @@ Point PhyloScope at any folder containing:
 | File | Description |
 |------|-------------|
 | `*.nwk` | Newick tree (exactly one) |
-| `*.aa.fa` | Gapped protein alignment (exactly one) |
+| `*.aa.fa` | Gapped protein alignment (exactly one, optional) |
 | `orthofinder-input/*.fa` | Per-species FASTA files for tip-to-species mapping (optional) |
 
 An example dataset is provided in `example_data/`.
@@ -109,6 +120,7 @@ An example dataset is provided in `example_data/`.
 - **Uniform triangles**: toggle to make all collapsed triangles the same size regardless of tip count
 - **Triangle size**: adjustable via slider
 - **Subtree focus**: Ctrl+click an internal node to view its subtree in isolation; click "Back to full tree" to return
+- **Re-root**: Ctrl+Shift+click any node or tip to re-root the tree at that point
 - **Pan and zoom**: mouse drag to pan, scroll wheel to zoom
 
 ### Fast Mode (Large Trees)
@@ -118,10 +130,22 @@ An example dataset is provided in `example_data/`.
 - **Render cache**: skips re-render when no relevant state has changed
 - **Auto-collapse**: for trees >2000 tips, automatically collapses clades to show ~50 visible groups; shift-click to expand clades of interest
 
+### Undo / Redo
+- Full undo/redo for tree operations: re-root, collapse/expand, subtree focus, restore full tree
+- **Keyboard shortcuts**: Ctrl+Z to undo, Ctrl+Shift+Z (or Ctrl+Y) to redo
+- Buttons in the Subtree Focus section; stack capped at 20 entries
+
 ### Node Selection
-- **Click** an internal node to select it — the node appears as a larger black dot
+- **Click** an internal node to select it — the node appears as a larger black dot with a red ring
 - The aligned FASTA for the subtree is automatically copied to the clipboard
 - The sidebar shows species counts per selected node, and motif entries show per-node match counts with matching sequence names
+
+### Clade Labels
+- Select a node, then type a label in the **Clade Labels** section to annotate it
+- Labels display as bold text next to the node dot on the tree (and on collapsed triangles)
+- Labels are included in SVG/PNG/PDF exports
+- Labels persist across undo/redo and are saved/restored with sessions
+- Small "x" button to remove individual labels
 
 ### Species Highlighting
 - Check species in the sidebar to color their tips (both labels and dots)
@@ -155,10 +179,25 @@ An example dataset is provided in `example_data/`.
 ### Shared Nodes
 - Select species, then highlight all internal nodes containing all checked species
 - Optional species exclusion filter (nodes must not contain excluded species)
+- Clickable list of matching nodes — click to select and pan to the node
+
+### Tip Filtering
+- **Hide by regex**: enter a pattern to hide all matching tips from the tree
+- **Hide unchecked species**: hide all tips belonging to unchecked species
+- **Show all**: reset to show all tips
+- Badge shows how many tips are currently hidden
+- Filtering is instant and reversible — hidden tips are visually removed from the layout but remain in the underlying data
+- Works across all three layout modes
+
+### Pairwise Compare
+- Select two tips (with autocomplete) and click **Compare** to see:
+  - **Patristic distance**: sum of branch lengths from each tip to their LCA (computed client-side)
+  - **Sequence identity**: percentage of identical positions at ungapped alignment columns (computed server-side, requires alignment)
 
 ### Image Export
 - **SVG**: download a standalone SVG with inlined styles (opens in any browser or Inkscape)
 - **PNG**: download a 2x resolution PNG for presentations and documents
+- **PDF**: download a vector PDF (uses jsPDF + svg2pdf.js, bundled locally); auto-detects landscape/portrait
 
 ### Alignment Export
 - **Click** an internal node to select it for export (also copies FASTA to clipboard)
@@ -174,6 +213,10 @@ An example dataset is provided in `example_data/`.
 - **Click** an internal node to select it, then:
   - **Download .nwk**: save the subtree as a Newick file
   - **Copy to clipboard**: copy the Newick string directly
+
+### Session Save / Load
+- **Save session**: downloads a JSON file with all UI state — collapsed nodes, clade labels, species selections, motif searches, tip filters, layout settings, zoom/pan, and the input folder path
+- **Load session**: pick a session file to restore all state; also available from the setup dialog to resume without re-entering the data path
 
 ## API Endpoints
 
@@ -192,6 +235,8 @@ An example dataset is provided in `example_data/`.
 | `GET /api/tip-names` | All tip names (for autocomplete) |
 | `GET /api/export?node_id=N&...` | Download gapped FASTA for a subtree |
 | `GET /api/export-newick?node_id=N` | Download subtree as Newick string |
+| `GET /api/pairwise?tip1=X&tip2=Y` | Pairwise sequence identity between two tips |
+| `POST /api/reroot` | Re-root tree at a node (`{"node_id": N}`) |
 | `POST /api/reset` | Reset server state to load new data |
 
 ### Export Parameters
@@ -207,13 +252,17 @@ An example dataset is provided in `example_data/`.
 ## Project Structure
 
 ```
-environment.yml     # Conda/micromamba environment spec
+logo.png              # PhyloScope logo
+environment.yml       # Conda/micromamba environment spec
 browser/
-  app.py            # FastAPI backend
-  run.sh            # Launch script
+  app.py              # FastAPI backend
+  run.sh              # Launch script
   static/
-    index.html      # Single-page app
-    app.js          # All client-side logic
-    style.css       # Styling
-example_data/       # Example tree, alignment, and species data
+    index.html        # Single-page app
+    app.js            # All client-side logic
+    style.css         # Styling
+    logo.png          # Cropped logo for sidebar
+    jspdf.umd.min.js  # jsPDF library (bundled)
+    svg2pdf.umd.min.js # svg2pdf.js library (bundled)
+example_data/         # Example tree, alignment, and species data
 ```
