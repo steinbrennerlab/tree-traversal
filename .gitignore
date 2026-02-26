@@ -15,13 +15,7 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# 1. Ignore all subfolders (but keep files in the root)
-/*
-
-# 2. Allow the .gitignore file itself
-!.gitignore
-
-# 3. Specifically allow the folder you want to keep
+# Ignore all subfolders except the ones we want
+/*/
 !example_data/
 !browser/
-!logo.png
