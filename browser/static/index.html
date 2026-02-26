@@ -44,6 +44,10 @@
       <div id="browser-dir-list" class="browser-dir-list"></div>
       <button id="browser-select" class="btn" disabled>Select this folder</button>
     </div>
+    <div class="setup-divider">or</div>
+    <div class="setup-row">
+      <button id="setup-load-session" class="btn" style="flex:1;">Load saved session</button>
+    </div>
     <div class="setup-hint">
       <p>Required folder structure:</p>
       <pre>  your-folder/
@@ -88,6 +92,10 @@
     <h3>Subtree Focus</h3>
     <p class="hint" id="subtree-hint">Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation<br>Ctrl+Shift+click: re-root at node</p>
     <button id="sidebar-back-full-tree" class="btn" style="display:none;">Back to full tree</button>
+    <div class="row" style="margin-top:6px;">
+      <button id="undo-btn" class="btn-sm" disabled>Undo</button>
+      <button id="redo-btn" class="btn-sm" disabled>Redo</button>
+    </div>
   </div>
 
   <div class="section">
@@ -143,10 +151,51 @@
   </div>
 
   <div class="section">
+    <h3>Filter Tips</h3>
+    <span id="filter-badge" class="filter-badge" style="display:none;"></span>
+    <div class="row">
+      <input type="text" id="filter-tips-input" placeholder="Regex to hide tips">
+      <button id="filter-tips-btn" class="btn">Hide</button>
+    </div>
+    <div class="row">
+      <button id="filter-unchecked-btn" class="btn-sm">Hide unchecked species</button>
+      <button id="filter-show-all-btn" class="btn-sm">Show all</button>
+    </div>
+    <div id="filter-result" class="hint"></div>
+  </div>
+
+  <div class="section">
+    <h3>Clade Labels</h3>
+    <div id="label-input-container" style="display:none;">
+      <div class="row">
+        <input type="text" id="node-label-input" placeholder="Label for selected node">
+        <button id="set-label-btn" class="btn">Set</button>
+      </div>
+    </div>
+    <div id="label-list"></div>
+    <p class="hint" id="label-hint">Select a node to add a label</p>
+  </div>
+
+  <div class="section">
+    <h3>Pairwise Compare</h3>
+    <div class="row">
+      <input type="text" id="pairwise-tip-a" placeholder="Tip A" list="tip-datalist">
+    </div>
+    <div class="row">
+      <input type="text" id="pairwise-tip-b" placeholder="Tip B" list="tip-datalist">
+    </div>
+    <div class="row">
+      <button id="pairwise-compare-btn" class="btn">Compare</button>
+    </div>
+    <div id="pairwise-result" class="hint" style="white-space:pre-wrap;"></div>
+  </div>
+
+  <div class="section">
     <h3>Export Image</h3>
     <div class="row">
       <button id="export-svg-btn" class="btn">SVG</button>
       <button id="export-png-btn" class="btn">PNG</button>
+      <button id="export-pdf-btn" class="btn">PDF</button>
     </div>
     <div id="export-viz-result"></div>
   </div>
@@ -198,6 +247,15 @@
       <div id="newick-result"></div>
     </div>
   </div>
+
+  <div class="section">
+    <h3>Session</h3>
+    <div class="row">
+      <button id="session-save-btn" class="btn">Save session</button>
+      <button id="session-load-btn" class="btn">Load session</button>
+    </div>
+    <div id="session-result" class="hint"></div>
+  </div>
 </div>
 
 <datalist id="tip-datalist"></datalist>
@@ -214,6 +272,8 @@
 
 <div id="tooltip"></div>
 
+<script src="/static/jspdf.umd.min.js"></script>
+<script src="/static/svg2pdf.umd.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

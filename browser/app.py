@@ -783,6 +783,46 @@ async def export_newick(node_id: int = Query(..., description="Node ID")):
     return PlainTextResponse(content=nwk, media_type="text/plain")
 
 
+@app.get("/api/pairwise")
+async def api_pairwise(
+    tip1: str = Query(..., description="First tip name"),
+    tip2: str = Query(..., description="Second tip name"),
+):
+    """Compute pairwise sequence identity between two tips."""
+    err = require_loaded()
+    if err:
+        return err
+    if not state["has_fasta"]:
+        return JSONResponse(status_code=400, content={"error": "No alignment loaded"})
+
+    seqs = state["protein_seqs"]
+    if tip1 not in seqs:
+        return {"error": f"Tip '{tip1}' not found in alignment"}
+    if tip2 not in seqs:
+        return {"error": f"Tip '{tip2}' not found in alignment"}
+
+    seq1 = seqs[tip1]
+    seq2 = seqs[tip2]
+    if len(seq1) != len(seq2):
+        return {"error": "Sequences have different lengths in alignment"}
+
+    identical = 0
+    aligned = 0
+    for a, b in zip(seq1, seq2):
+        if a == "-" or b == "-":
+            continue
+        aligned += 1
+        if a == b:
+            identical += 1
+
+    identity = identical / aligned if aligned > 0 else 0.0
+    return {
+        "identity": identity,
+        "identical_positions": identical,
+        "aligned_length": aligned,
+    }
+
+
 @app.get("/api/tip-lengths")
 async def tip_lengths():
     """Return ungapped sequence lengths for all tips."""

@@ -31,6 +31,12 @@ let fastMode = false;            // performance mode for large trees
 let selectedTip = null;          // tip name highlighted with red circle from name search
 let renderCache = null;          // cached SVG fragment string for fast mode
 let renderCacheKey = null;       // key to invalidate cache
+let hiddenTips = new Set();      // tip names hidden by filter
+let nodeLabels = {};             // nodeId → string label
+let parentMap = {};              // nodeId → parent node ref
+let undoStack = [];              // undo history
+let redoStack = [];              // redo history
+let state_inputDir = "";         // input folder path for session save
 
 // Pan / zoom state
 let scale = 1, tx = 20, ty = 20;
@@ -95,12 +101,18 @@ function drawMotifPie(fragments, cx, cy, r, colors) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+function isNodeHidden(node) {
+  if (!node.ch || node.ch.length === 0) return hiddenTips.has(node.name);
+  return node.ch.every(c => isNodeHidden(c));
+}
+
 function countLeaves(node) {
+  if (isNodeHidden(node)) return 0;
   if (collapsedNodes.has(node.id) && node.ch) return 1;
   if (!node.ch || node.ch.length === 0) return 1;
   let n = 0;
   for (const c of node.ch) n += countLeaves(c);
-  return n;
+  return n || 0;
 }
 
 function countAllTips(node) {
@@ -124,10 +136,12 @@ function deepCopyNode(node) {
 }
 
 function openSubtree(nodeId) {
+  pushUndo();
   if (fullTreeData === null) fullTreeData = treeData;
   const subtreeCopy = deepCopyNode(nodeById[nodeId]);
   treeData = subtreeCopy;
   nodeById = {};
+  parentMap = {};
   indexNodes(treeData);
   collapsedNodes.clear();
   scale = 1; tx = 20; ty = 20;
@@ -137,6 +151,7 @@ function openSubtree(nodeId) {
 }
 
 async function rerootAt(nodeId) {
+  pushUndo();
   try {
     const resp = await fetch("/api/reroot", {
       method: "POST",
@@ -172,9 +187,11 @@ async function rerootAt(nodeId) {
 }
 
 function restoreFullTree() {
+  pushUndo();
   treeData = fullTreeData;
   fullTreeData = null;
   nodeById = {};
+  parentMap = {};
   indexNodes(treeData);
   scale = 1; tx = 20; ty = 20;
   document.getElementById("subtree-bar").style.display = "none";
@@ -195,6 +212,7 @@ async function init() {
   // Fetch status to get has_fasta flag and file info
   const statusResp = await fetch("/api/status").then(r => r.json());
   hasFasta = !!statusResp.has_fasta;
+  state_inputDir = statusResp.input_dir || "";
 
   const fetches = [
     fetch("/api/tree").then(r => r.json()),
@@ -297,9 +315,10 @@ function applyFastaState() {
   }
 }
 
-function indexNodes(node) {
+function indexNodes(node, parent) {
   nodeById[node.id] = node;
-  if (node.ch) node.ch.forEach(indexNodes);
+  if (parent) parentMap[node.id] = parent;
+  if (node.ch) node.ch.forEach(c => indexNodes(c, node));
 }
 
 // ---------------------------------------------------------------------------
@@ -441,9 +460,38 @@ function setupControls() {
     document.querySelectorAll("#exclude-species-list input").forEach(cb => cb.checked = false);
   });
 
+  // Undo / Redo
+  document.getElementById("undo-btn").addEventListener("click", undo);
+  document.getElementById("redo-btn").addEventListener("click", redo);
+  document.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === "Z" && e.shiftKey) { e.preventDefault(); redo(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === "y") { e.preventDefault(); redo(); }
+  });
+
   // Subtree back buttons
   document.getElementById("back-full-tree").addEventListener("click", restoreFullTree);
   document.getElementById("sidebar-back-full-tree").addEventListener("click", restoreFullTree);
+
+  // Filter tips
+  document.getElementById("filter-tips-btn").addEventListener("click", filterTipsByRegex);
+  document.getElementById("filter-tips-input").addEventListener("keydown", e => { if (e.key === "Enter") filterTipsByRegex(); });
+  document.getElementById("filter-unchecked-btn").addEventListener("click", filterTipsUncheckedSpecies);
+  document.getElementById("filter-show-all-btn").addEventListener("click", showAllTips);
+
+  // Clade labels
+  document.getElementById("set-label-btn").addEventListener("click", setNodeLabel);
+  document.getElementById("node-label-input").addEventListener("keydown", e => { if (e.key === "Enter") setNodeLabel(); });
+
+  // Pairwise compare
+  document.getElementById("pairwise-compare-btn").addEventListener("click", comparePairwise);
+
+  // Session save/load
+  document.getElementById("session-save-btn").addEventListener("click", saveSession);
+  document.getElementById("session-load-btn").addEventListener("click", loadSession);
+
+  // PDF export
+  document.getElementById("export-pdf-btn").addEventListener("click", exportPDF);
 
   // Pan/zoom
   svg.addEventListener("wheel", e => {
@@ -730,6 +778,8 @@ function getRenderCacheKey(checkedSpecies) {
     exportNodeId,
     selectedTip,
     fastMode,
+    [...hiddenTips].sort().join(","),
+    JSON.stringify(nodeLabels),
   ].join("|");
 }
 
@@ -794,6 +844,7 @@ function renderRectangular(fragments, checkedSpecies) {
   const xScale = usePhylogram ? 800 : 0;
 
   function layout(node, depth) {
+    if (isNodeHidden(node)) return null;
     const bl = node.bl || 0;
     const x = usePhylogram ? depth + bl * xScale : depth + 20;
 
@@ -806,16 +857,19 @@ function renderRectangular(fragments, checkedSpecies) {
       return { ...node, x, parentX: depth, y, collapsed: true, tipCount };
     }
     if (!node.ch || node.ch.length === 0) {
+      if (hiddenTips.has(node.name)) return null;
       const y = leafIndex * tipSpacing;
       leafIndex++;
       return { ...node, x, parentX: depth, y };
     }
-    const children = node.ch.map(c => layout(c, x));
+    const children = node.ch.map(c => layout(c, x)).filter(c => c !== null);
+    if (children.length === 0) return null;
     const y = (children[0].y + children[children.length - 1].y) / 2;
     return { ...node, x, parentX: depth, y, layoutChildren: children };
   }
 
   const root = layout(treeData, 0);
+  if (!root) return;
 
   if (fastMode) {
     drawFastRectangular(fragments, root, checkedSpecies);
@@ -831,9 +885,10 @@ function renderRectangular(fragments, checkedSpecies) {
     if (node.collapsed) {
       const triH = (uniformTriangles ? 30 : Math.min(node.tipCount * 2, 40)) * triangleScale / 100;
       const triW = 30 * triangleScale / 100;
+      const triLabel = nodeLabels[node.id] ? `${nodeLabels[node.id]} (${node.tipCount})` : `${node.tipCount} tips`;
       fragments.push(
         `<polygon points="${nx},${ny} ${nx + triW},${ny - triH / 2} ${nx + triW},${ny + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
-        `<text x="${nx + triW + 4}" y="${ny + 3}" font-size="9" fill="#666">${node.tipCount} tips</text>`
+        `<text x="${nx + triW + 4}" y="${ny + 3}" font-size="9" fill="#666">${triLabel}</text>`
       );
       if (selectedTip && collectAllTipNames(node).includes(selectedTip)) {
         fragments.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
@@ -865,6 +920,7 @@ function renderCircular(fragments, checkedSpecies) {
 
   // Layout: assign angle (from leaf index) and radius (from depth)
   function layout(node, depth) {
+    if (isNodeHidden(node)) return null;
     const bl = node.bl || 0;
     const r = usePhylogram ? depth + bl * rScale : depth + rStep;
 
@@ -875,17 +931,20 @@ function renderCircular(fragments, checkedSpecies) {
       return { ...node, r, parentR: depth, angle, collapsed: true, tipCount };
     }
     if (!node.ch || node.ch.length === 0) {
+      if (hiddenTips.has(node.name)) return null;
       const angle = (leafIndex / totalLeaves) * 2 * Math.PI;
       leafIndex++;
       return { ...node, r, parentR: depth, angle };
     }
-    const children = node.ch.map(c => layout(c, r));
+    const children = node.ch.map(c => layout(c, r)).filter(c => c !== null);
+    if (children.length === 0) return null;
     // Node angle = midpoint of children's angular range
     const angle = (children[0].angle + children[children.length - 1].angle) / 2;
     return { ...node, r, parentR: depth, angle, layoutChildren: children };
   }
 
   const root = layout(treeData, 0);
+  if (!root) return;
 
   function toXY(r, angle) {
     return [r * Math.cos(angle), r * Math.sin(angle)];
@@ -958,6 +1017,7 @@ function renderUnrooted(fragments, checkedSpecies) {
 
   // Assign each node: x, y, parentX, parentY, angle (for label rotation)
   function layout(node, px, py, startAngle, wedge, depth) {
+    if (isNodeHidden(node)) return null;
     const bl = node.bl || 0;
     const len = usePhylogram ? bl * blScale : blStep;
     const midAngle = startAngle + wedge / 2;
@@ -969,24 +1029,30 @@ function renderUnrooted(fragments, checkedSpecies) {
       return { ...node, x: nx, y: ny, parentX: px, parentY: py, angle: midAngle, collapsed: true, tipCount, wedge };
     }
     if (!node.ch || node.ch.length === 0) {
+      if (hiddenTips.has(node.name)) return null;
       return { ...node, x: nx, y: ny, parentX: px, parentY: py, angle: midAngle };
     }
 
     // Divide wedge among children proportional to leaf count
     const childLeafCounts = node.ch.map(c => countLeaves(c));
     const totalChildLeaves = childLeafCounts.reduce((a, b) => a + b, 0);
+    if (totalChildLeaves === 0) return null;
     let curAngle = startAngle;
-    const children = node.ch.map((c, i) => {
+    const children = [];
+    node.ch.forEach((c, i) => {
+      if (childLeafCounts[i] === 0) return;
       const childWedge = (childLeafCounts[i] / totalChildLeaves) * wedge;
       const result = layout(c, nx, ny, curAngle, childWedge, depth + 1);
       curAngle += childWedge;
-      return result;
+      if (result) children.push(result);
     });
+    if (children.length === 0) return null;
 
     return { ...node, x: nx, y: ny, parentX: px, parentY: py, angle: midAngle, layoutChildren: children };
   }
 
   const root = layout(treeData, 0, 0, 0, 2 * Math.PI, 0);
+  if (!root) return;
 
   if (fastMode) {
     drawFastUnrooted(fragments, root, checkedSpecies);
@@ -1055,6 +1121,11 @@ function drawNodeDot(fragments, cx, cy, node) {
   if (showBootstraps && node.sup != null) {
     fragments.push(
       `<text x="${cx + 6}" y="${cy - 5}" class="bootstrap-label">${node.sup}</text>`
+    );
+  }
+  if (nodeLabels[node.id]) {
+    fragments.push(
+      `<text x="${cx + 8}" y="${cy + 4}" class="node-label">${nodeLabels[node.id]}</text>`
     );
   }
 }
@@ -1492,6 +1563,7 @@ function onTreeClick(e) {
       return;
     }
     if (e.shiftKey) {
+      pushUndo();
       if (collapsedNodes.has(nid)) collapsedNodes.delete(nid);
       else collapsedNodes.add(nid);
       invalidateRenderCache();
@@ -1637,6 +1709,9 @@ async function openExportPanel(nodeId) {
     `Node #${nodeId} — ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
   document.getElementById("newick-result").textContent = "";
 
+  // Update label input
+  updateLabelInput();
+
   // Scroll panel into view
   document.getElementById("export-section").scrollIntoView({ behavior: "smooth" });
 }
@@ -1756,6 +1831,11 @@ document.getElementById("reset-btn").addEventListener("click", async () => {
   fastMode = false;
   renderCache = null;
   renderCacheKey = null;
+  hiddenTips = new Set();
+  nodeLabels = {};
+  parentMap = {};
+  undoStack = [];
+  redoStack = [];
   scale = 1; tx = 20; ty = 20;
   // Clear UI
   group.innerHTML = "";
@@ -1955,6 +2035,8 @@ async function doSetupLoad() {
   }
 }
 
+document.getElementById("setup-load-session").addEventListener("click", () => loadSession(true));
+
 setupLoadBtn.addEventListener("click", async () => {
   // Ensure detected files are scanned before loading
   const path = setupPathInput.value.trim();
@@ -1999,6 +2081,441 @@ setupPathInput.addEventListener("input", () => {
 })();
 
 // ---------------------------------------------------------------------------
+// Tip filtering
+// ---------------------------------------------------------------------------
+function filterTipsByRegex() {
+  const pattern = document.getElementById("filter-tips-input").value.trim();
+  if (!pattern) return;
+  try {
+    const re = new RegExp(pattern, "i");
+    const allTips = collectAllTipNames(treeData);
+    let count = 0;
+    for (const name of allTips) {
+      if (re.test(name)) { hiddenTips.add(name); count++; }
+    }
+    updateFilterBadge();
+    invalidateRenderCache();
+    renderTree();
+    document.getElementById("filter-result").textContent = `${count} tips hidden`;
+  } catch (e) {
+    document.getElementById("filter-result").textContent = `Invalid regex: ${e.message}`;
+  }
+}
+
+function filterTipsUncheckedSpecies() {
+  const checked = new Set(
+    [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species)
+  );
+  if (checked.size === 0) {
+    document.getElementById("filter-result").textContent = "Check at least one species first";
+    return;
+  }
+  const allTips = collectAllTipNames(treeData);
+  let count = 0;
+  for (const name of allTips) {
+    const sp = tipToSpecies[name];
+    if (sp && !checked.has(sp)) { hiddenTips.add(name); count++; }
+  }
+  updateFilterBadge();
+  invalidateRenderCache();
+  renderTree();
+  document.getElementById("filter-result").textContent = `${count} tips hidden`;
+}
+
+function showAllTips() {
+  hiddenTips.clear();
+  updateFilterBadge();
+  invalidateRenderCache();
+  renderTree();
+  document.getElementById("filter-result").textContent = "";
+}
+
+function updateFilterBadge() {
+  const badge = document.getElementById("filter-badge");
+  if (hiddenTips.size > 0) {
+    badge.textContent = `${hiddenTips.size} tips hidden`;
+    badge.style.display = "";
+  } else {
+    badge.style.display = "none";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Clade annotation / labeling
+// ---------------------------------------------------------------------------
+function updateLabelInput() {
+  const container = document.getElementById("label-input-container");
+  if (exportNodeId == null) {
+    container.style.display = "none";
+    return;
+  }
+  container.style.display = "";
+  const input = document.getElementById("node-label-input");
+  input.value = nodeLabels[exportNodeId] || "";
+}
+
+function setNodeLabel() {
+  if (exportNodeId == null) return;
+  const val = document.getElementById("node-label-input").value.trim();
+  if (val) {
+    nodeLabels[exportNodeId] = val;
+  } else {
+    delete nodeLabels[exportNodeId];
+  }
+  invalidateRenderCache();
+  renderTree();
+  buildLabelList();
+}
+
+function buildLabelList() {
+  const container = document.getElementById("label-list");
+  container.innerHTML = "";
+  for (const [nid, label] of Object.entries(nodeLabels)) {
+    const row = document.createElement("div");
+    row.className = "label-entry";
+    const text = document.createElement("span");
+    text.className = "label-text";
+    text.textContent = `#${nid}: ${label}`;
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "motif-remove";
+    removeBtn.textContent = "\u00d7";
+    removeBtn.addEventListener("click", () => {
+      delete nodeLabels[nid];
+      invalidateRenderCache();
+      renderTree();
+      buildLabelList();
+      updateLabelInput();
+    });
+    row.append(text, removeBtn);
+    container.appendChild(row);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Undo / Redo
+// ---------------------------------------------------------------------------
+function captureState() {
+  return {
+    treeData: deepCopyNode(treeData),
+    collapsedNodes: new Set(collapsedNodes),
+    exportNodeId,
+    selectedTip,
+    fullTreeData: fullTreeData ? deepCopyNode(fullTreeData) : null,
+    scale, tx, ty,
+    hiddenTips: new Set(hiddenTips),
+    nodeLabels: { ...nodeLabels },
+  };
+}
+
+function restoreState(s) {
+  treeData = s.treeData;
+  collapsedNodes = s.collapsedNodes;
+  exportNodeId = s.exportNodeId;
+  selectedTip = s.selectedTip;
+  fullTreeData = s.fullTreeData;
+  scale = s.scale; tx = s.tx; ty = s.ty;
+  hiddenTips = s.hiddenTips;
+  nodeLabels = s.nodeLabels;
+  nodeById = {};
+  parentMap = {};
+  indexNodes(treeData);
+  if (fullTreeData) {
+    // subtree mode
+    document.getElementById("subtree-bar").style.display = "";
+    document.getElementById("sidebar-back-full-tree").style.display = "";
+  } else {
+    document.getElementById("subtree-bar").style.display = "none";
+    document.getElementById("sidebar-back-full-tree").style.display = "none";
+  }
+  invalidateRenderCache();
+  updateFilterBadge();
+  buildLabelList();
+  updateLabelInput();
+  updateUndoRedoButtons();
+  renderTree();
+}
+
+function pushUndo() {
+  undoStack.push(captureState());
+  if (undoStack.length > 20) undoStack.shift();
+  redoStack = [];
+  updateUndoRedoButtons();
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+  redoStack.push(captureState());
+  restoreState(undoStack.pop());
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+  undoStack.push(captureState());
+  restoreState(redoStack.pop());
+}
+
+function updateUndoRedoButtons() {
+  const undoBtn = document.getElementById("undo-btn");
+  const redoBtn = document.getElementById("redo-btn");
+  if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+  if (redoBtn) redoBtn.disabled = redoStack.length === 0;
+}
+
+// ---------------------------------------------------------------------------
+// Pairwise distance / identity
+// ---------------------------------------------------------------------------
+function findLCA(tipA, tipB) {
+  // Find node objects for each tip
+  let nodeA = null, nodeB = null;
+  for (const n of Object.values(nodeById)) {
+    if (n.name === tipA && (!n.ch || n.ch.length === 0)) nodeA = n;
+    if (n.name === tipB && (!n.ch || n.ch.length === 0)) nodeB = n;
+  }
+  if (!nodeA || !nodeB) return null;
+
+  // Build ancestor set for A
+  const ancestorsA = new Set();
+  let cur = nodeA;
+  while (cur) {
+    ancestorsA.add(cur.id);
+    cur = parentMap[cur.id];
+  }
+  // Walk up from B to find first common ancestor
+  cur = nodeB;
+  while (cur) {
+    if (ancestorsA.has(cur.id)) return cur;
+    cur = parentMap[cur.id];
+  }
+  return null;
+}
+
+function patristicDistance(tipA, tipB) {
+  const lca = findLCA(tipA, tipB);
+  if (!lca) return null;
+
+  function distToNode(tipName, targetId) {
+    let node = null;
+    for (const n of Object.values(nodeById)) {
+      if (n.name === tipName && (!n.ch || n.ch.length === 0)) { node = n; break; }
+    }
+    if (!node) return 0;
+    let dist = 0;
+    let cur = node;
+    while (cur && cur.id !== targetId) {
+      dist += cur.bl || 0;
+      cur = parentMap[cur.id];
+    }
+    return dist;
+  }
+
+  return distToNode(tipA, lca.id) + distToNode(tipB, lca.id);
+}
+
+async function comparePairwise() {
+  const tipA = document.getElementById("pairwise-tip-a").value.trim();
+  const tipB = document.getElementById("pairwise-tip-b").value.trim();
+  const resultEl = document.getElementById("pairwise-result");
+  if (!tipA || !tipB) { resultEl.textContent = "Enter two tip names"; return; }
+
+  const dist = patristicDistance(tipA, tipB);
+  let lines = [];
+  if (dist !== null) {
+    lines.push(`Patristic distance: ${dist.toFixed(6)}`);
+  } else {
+    lines.push("Could not compute patristic distance (tips not found)");
+  }
+
+  // Server-side sequence identity if alignment loaded
+  if (hasFasta) {
+    try {
+      const resp = await fetch(`/api/pairwise?tip1=${encodeURIComponent(tipA)}&tip2=${encodeURIComponent(tipB)}`);
+      const data = await resp.json();
+      if (data.error) {
+        lines.push(data.error);
+      } else {
+        lines.push(`Sequence identity: ${(data.identity * 100).toFixed(1)}% (${data.identical_positions}/${data.aligned_length} positions)`);
+      }
+    } catch (e) {
+      lines.push("Server error computing identity");
+    }
+  }
+  resultEl.textContent = lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Save / Load session
+// ---------------------------------------------------------------------------
+function saveSession() {
+  const checkedSpecies = [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species);
+  const excludedSpecies = [...document.querySelectorAll("#exclude-species-list input:checked")].map(cb => cb.dataset.excludeSpecies);
+
+  const session = {
+    version: 1,
+    inputDir: state_inputDir,
+    collapsedNodes: [...collapsedNodes],
+    nodeLabels,
+    exportNodeId,
+    selectedTip,
+    checkedSpecies,
+    excludedSpecies,
+    motifList: motifList.map(m => ({ pattern: m.pattern, type: m.type })),
+    nameSearch: document.getElementById("name-input").value,
+    layoutMode,
+    usePhylogram,
+    showTipLabels,
+    showBootstraps,
+    showLengths,
+    fastMode,
+    uniformTriangles,
+    triangleScale,
+    tipSpacing,
+    hiddenTips: [...hiddenTips],
+    scale, tx, ty,
+  };
+
+  const blob = new Blob([JSON.stringify(session, null, 2)], { type: "application/json" });
+  triggerDownload(blob, "phyloscope-session.json");
+}
+
+async function loadSession(fromSetup) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json";
+  input.addEventListener("change", async () => {
+    const file = input.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const session = JSON.parse(text);
+      if (session.version !== 1) { alert("Unknown session version"); return; }
+
+      // If called from setup, load data first
+      if (fromSetup) {
+        const inputDir = session.inputDir || setupPathInput.value.trim();
+        const setupError = document.getElementById("setup-error");
+        if (!inputDir) {
+          setupError.textContent = "Session has no saved path. Enter a folder path above, then try again.";
+          return;
+        }
+        setupError.textContent = "";
+        const resp = await fetch("/api/load", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ input_dir: inputDir }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          setupError.textContent = data.error || "Failed to load data from session path.";
+          return;
+        }
+        hideSetup();
+        await init();
+      }
+
+      // Restore state
+      collapsedNodes = new Set(session.collapsedNodes || []);
+      nodeLabels = session.nodeLabels || {};
+      exportNodeId = session.exportNodeId ?? null;
+      selectedTip = session.selectedTip ?? null;
+      hiddenTips = new Set(session.hiddenTips || []);
+      layoutMode = session.layoutMode || "rectangular";
+      usePhylogram = session.usePhylogram ?? true;
+      showTipLabels = session.showTipLabels ?? true;
+      showBootstraps = session.showBootstraps ?? false;
+      showLengths = session.showLengths ?? false;
+      fastMode = session.fastMode ?? false;
+      uniformTriangles = session.uniformTriangles ?? false;
+      triangleScale = session.triangleScale ?? 100;
+      tipSpacing = session.tipSpacing ?? 16;
+      scale = session.scale ?? 1;
+      tx = session.tx ?? 20;
+      ty = session.ty ?? 20;
+
+      // Update UI controls
+      document.querySelector(`input[name="layout"][value="${layoutMode}"]`).checked = true;
+      document.getElementById("phylogram-toggle").checked = usePhylogram;
+      document.getElementById("tip-labels-toggle").checked = showTipLabels;
+      document.getElementById("bootstrap-toggle").checked = showBootstraps;
+      document.getElementById("length-toggle").checked = showLengths;
+      document.getElementById("fast-mode-toggle").checked = fastMode;
+      document.getElementById("uniform-triangles-toggle").checked = uniformTriangles;
+      document.getElementById("triangle-size").value = triangleScale;
+      document.getElementById("tip-spacing").value = tipSpacing;
+
+      // Restore species checkboxes
+      if (session.checkedSpecies) {
+        const checkSet = new Set(session.checkedSpecies);
+        document.querySelectorAll("#species-list input").forEach(cb => {
+          cb.checked = checkSet.has(cb.dataset.species);
+        });
+      }
+      if (session.excludedSpecies) {
+        const exSet = new Set(session.excludedSpecies);
+        document.querySelectorAll("#exclude-species-list input").forEach(cb => {
+          cb.checked = exSet.has(cb.dataset.excludeSpecies);
+        });
+      }
+
+      // Restore name search
+      if (session.nameSearch) {
+        document.getElementById("name-input").value = session.nameSearch;
+        searchName();
+      }
+
+      // Restore motifs
+      motifList = [];
+      if (session.motifList) {
+        for (const m of session.motifList) {
+          const resp = await fetch(`/api/motif?pattern=${encodeURIComponent(m.pattern)}&type=${m.type}`);
+          const data = await resp.json();
+          if (!data.error) {
+            const color = MOTIF_PALETTE[motifList.length % MOTIF_PALETTE.length];
+            motifList.push({ pattern: m.pattern, type: m.type, tipNames: data.matched_tips || [], color });
+          }
+        }
+        rebuildMotifMatches();
+        buildMotifList();
+      }
+
+      updateFilterBadge();
+      buildLabelList();
+      updateLabelInput();
+      invalidateRenderCache();
+      renderTree();
+      document.getElementById("session-result").textContent = "Session loaded.";
+    } catch (e) {
+      document.getElementById("session-result").textContent = `Load failed: ${e.message}`;
+    }
+  });
+  input.click();
+}
+
+// ---------------------------------------------------------------------------
+// PDF export
+// ---------------------------------------------------------------------------
+async function exportPDF() {
+  const resultEl = document.getElementById("export-viz-result");
+  try {
+    const { svgString, width, height } = buildExportSVGString();
+    const { jsPDF } = window.jspdf;
+    const landscape = width > height;
+    const doc = new jsPDF({ orientation: landscape ? "landscape" : "portrait", unit: "pt", format: [width, height] });
+
+    const parser = new DOMParser();
+    const svgDoc = parser.parseFromString(svgString, "image/svg+xml");
+    const svgEl = svgDoc.documentElement;
+
+    await doc.svg(svgEl, { x: 0, y: 0, width, height });
+    doc.save("phyloscope-tree.pdf");
+    resultEl.style.color = "#27ae60";
+    resultEl.textContent = "PDF downloaded.";
+  } catch (e) {
+    resultEl.style.color = "#c0392b";
+    resultEl.textContent = `PDF export failed: ${e.message}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SVG / PNG export
 // ---------------------------------------------------------------------------
 const INLINE_STYLES = {
@@ -2007,6 +2524,7 @@ const INLINE_STYLES = {
   ".shared-node": "fill:#ff6600;stroke:#c40;stroke-width:1.5",
   ".collapsed-triangle": "fill:#cde;stroke:#89a",
   ".bootstrap-label": "font-size:8px;fill:#666",
+  ".node-label": "font-size:10px;font-weight:bold;fill:#333;font-family:system-ui,sans-serif",
 };
 
 function buildExportSVGString() {
