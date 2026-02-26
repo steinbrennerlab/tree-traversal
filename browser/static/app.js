@@ -695,10 +695,10 @@ function selectSharedNode(nodeId) {
   renderTree();
   // Pan to the node after a short delay to let render complete
   requestAnimationFrame(() => {
-    const circle = group.querySelector(`circle[data-nodeid="${nodeId}"]`);
-    if (circle) {
-      const cx = parseFloat(circle.getAttribute("cx"));
-      const cy = parseFloat(circle.getAttribute("cy"));
+    const ring = group.querySelector(".selected-node-ring");
+    if (ring) {
+      const cx = parseFloat(ring.getAttribute("cx"));
+      const cy = parseFloat(ring.getAttribute("cy"));
       const rect = svg.getBoundingClientRect();
       tx = rect.width / 2 - cx * scale;
       ty = rect.height / 2 - cy * scale;
@@ -1044,6 +1044,9 @@ function drawNodeDot(fragments, cx, cy, node) {
   const r = isSelected ? 6 : isShared ? 5 : 3;
   const fill = isSelected ? '#000' : isShared ? '#ff6600' : '#999';
   const cls = isSelected ? 'node-dot selected-node' : isShared ? 'node-dot shared-node' : 'node-dot';
+  if (isSelected) {
+    fragments.push(`<circle cx="${cx}" cy="${cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
+  }
   fragments.push(
     `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" class="${cls}"
       data-nodeid="${node.id}"
@@ -1239,6 +1242,11 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
     const st = dotData.find(d => d.isTip && d.tipName === selectedTip);
     if (st) fragments.push(`<circle cx="${st.cx}" cy="${st.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
   }
+  // Selected node red ring
+  if (exportNodeId != null) {
+    const sn = dotData.find(d => !d.isTip && d.nodeId === exportNodeId);
+    if (sn) fragments.push(`<circle cx="${sn.cx}" cy="${sn.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
+  }
 }
 
 function drawFastCircular(fragments, root, checkedSpecies, toXY) {
@@ -1348,6 +1356,11 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
     const st = dotData.find(d => d.isTip && d.tipName === selectedTip);
     if (st) fragments.push(`<circle cx="${st.cx}" cy="${st.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
   }
+  // Selected node red ring
+  if (exportNodeId != null) {
+    const sn = dotData.find(d => !d.isTip && d.nodeId === exportNodeId);
+    if (sn) fragments.push(`<circle cx="${sn.cx}" cy="${sn.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
+  }
 }
 
 function drawFastUnrooted(fragments, root, checkedSpecies) {
@@ -1441,6 +1454,11 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
   if (selectedTip) {
     const st = dotData.find(d => d.isTip && d.tipName === selectedTip);
     if (st) fragments.push(`<circle cx="${st.cx}" cy="${st.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+  }
+  // Selected node red ring
+  if (exportNodeId != null) {
+    const sn = dotData.find(d => !d.isTip && d.nodeId === exportNodeId);
+    if (sn) fragments.push(`<circle cx="${sn.cx}" cy="${sn.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
   }
 }
 
