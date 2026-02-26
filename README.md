@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="logo.png" alt="PhyloScope" width="200">
+  <img src="logo.png" alt="PhyloScope" width="400">
 </p>
 
 # PhyloScope
