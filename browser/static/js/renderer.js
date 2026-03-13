@@ -61,6 +61,7 @@ function getRenderCacheKey(checkedSpecies) {
     state.selectedTip,
     state.showTipLabels,
     state.tipLabelSize,
+    state.dotSize,
     state.showLengths,
     state.showBootstraps,
     state.fastMode,
@@ -195,8 +196,9 @@ function renderRectangular(fragments, checkedSpecies) {
       node.layoutChildren.forEach(draw);
     } else {
       drawTipDot(fragments, nx, ny, node, checkedSpecies);
-      const labelX = nx + 4;
-      if (state.showTipLabels) drawTipLabel(fragments, labelX, ny + 3, 0, node, checkedSpecies);
+      const d = state.dotSize;
+      const labelX = nx + d + 1;
+      if (state.showTipLabels) drawTipLabel(fragments, labelX, ny + d, 0, node, checkedSpecies);
       const labelWidth = state.showTipLabels ? estimateTipLabelWidth(node) : 0;
       heatmapAnchorX = Math.max(heatmapAnchorX, labelX + labelWidth);
       heatmapRows.push({ node, y: ny - 5 });
@@ -209,8 +211,9 @@ function renderRectangular(fragments, checkedSpecies) {
 
 function renderCircular(fragments, checkedSpecies) {
   const totalLeaves = countLeaves(state.treeData);
-  const rScale = state.usePhylogram ? 300 : 0;
-  const rStep = state.usePhylogram ? 0 : 15;
+  const spacingFactor = state.tipSpacing / 16;
+  const rScale = state.usePhylogram ? 300 * spacingFactor : 0;
+  const rStep = state.usePhylogram ? 0 : 15 * spacingFactor;
   let leafIndex = 0;
   const heatmapTips = [];
 
@@ -282,12 +285,14 @@ function renderCircular(fragments, checkedSpecies) {
       drawNodeDot(fragments, nx, ny, node);
       node.layoutChildren.forEach(draw);
     } else {
+      const d = state.dotSize;
       const deg = node.angle * 180 / Math.PI;
       const flip = (deg > 90 && deg < 270) || (deg < -90 && deg > -270);
       const textAngle = flip ? deg + 180 : deg;
       const anchor = flip ? "end" : "start";
-      const lx = nx + (flip ? -4 : 4) * Math.cos(node.angle);
-      const ly = ny + (flip ? -4 : 4) * Math.sin(node.angle);
+      const gap = d + 1;
+      const lx = nx + (flip ? -gap : gap) * Math.cos(node.angle);
+      const ly = ny + (flip ? -gap : gap) * Math.sin(node.angle);
       drawTipDot(fragments, nx, ny, node, checkedSpecies);
       if (state.showTipLabels) drawTipLabelRadial(fragments, lx, ly, textAngle, anchor, node, checkedSpecies);
       heatmapTips.push({
@@ -303,8 +308,9 @@ function renderCircular(fragments, checkedSpecies) {
 }
 
 function renderUnrooted(fragments, checkedSpecies) {
-  const blScale = state.usePhylogram ? 300 : 0;
-  const blStep = state.usePhylogram ? 0 : 20;
+  const spacingFactor = state.tipSpacing / 16;
+  const blScale = state.usePhylogram ? 300 * spacingFactor : 0;
+  const blStep = state.usePhylogram ? 0 : 20 * spacingFactor;
 
   function layout(node, px, py, startAngle, wedge) {
     if (isNodeHidden(node)) return null;
@@ -371,12 +377,13 @@ function renderUnrooted(fragments, checkedSpecies) {
       drawNodeDot(fragments, node.x, node.y, node);
       node.layoutChildren.forEach(draw);
     } else {
+      const gap = state.dotSize + 1;
       const deg = node.angle * 180 / Math.PI;
       const flip = (deg > 90 && deg < 270) || (deg < -90 && deg > -270);
       const textAngle = flip ? deg + 180 : deg;
       const anchor = flip ? "end" : "start";
-      const lx = node.x + 4 * Math.cos(node.angle);
-      const ly = node.y + 4 * Math.sin(node.angle);
+      const lx = node.x + gap * Math.cos(node.angle);
+      const ly = node.y + gap * Math.sin(node.angle);
       drawTipDot(fragments, node.x, node.y, node, checkedSpecies);
       if (state.showTipLabels) drawTipLabelRadial(fragments, lx, ly, textAngle, anchor, node, checkedSpecies);
     }
@@ -386,32 +393,35 @@ function renderUnrooted(fragments, checkedSpecies) {
 }
 
 function drawNodeDot(fragments, cx, cy, node) {
+  const d = state.dotSize;
   const isSelected = node.id === state.exportNodeId;
   const isShared = state.sharedNodes.has(node.id);
-  const r = isSelected ? 6 : isShared ? 5 : 3;
+  const r = isSelected ? d * 2 : isShared ? d * 1.7 : d;
+  const ringR = d * 5;
   const fill = isSelected ? "#000" : isShared ? "#ff6600" : "#999";
   const cls = isSelected ? "node-dot selected-node" : isShared ? "node-dot shared-node" : "node-dot";
   if (isSelected) {
-    fragments.push(`<circle cx="${cx}" cy="${cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
+    fragments.push(`<circle cx="${cx}" cy="${cy}" r="${ringR}" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
   }
   fragments.push(
     `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" class="${cls}" data-nodeid="${node.id}" ${node.sup != null ? `data-support="${node.sup}"` : ""}/>`
   );
   if (state.showBootstraps && node.sup != null) {
-    fragments.push(`<text x="${cx + 6}" y="${cy - 5}" class="bootstrap-label">${node.sup}</text>`);
+    fragments.push(`<text x="${cx + d * 2}" y="${cy - d * 1.7}" class="bootstrap-label">${node.sup}</text>`);
   }
   if (state.nodeLabels[node.id]) {
-    fragments.push(`<text x="${cx + 8}" y="${cy + 4}" class="node-label">${state.nodeLabels[node.id]}</text>`);
+    fragments.push(`<text x="${cx + d * 2.5}" y="${cy + d * 1.3}" class="node-label">${state.nodeLabels[node.id]}</text>`);
   }
 }
 
 function drawTipDot(fragments, cx, cy, node, checkedSpecies) {
+  const d = state.dotSize;
   const isMotif = state.motifMatches.has(node.name);
   const isName = state.nameMatches.has(node.name);
   const spColor = getNodeColor(node, checkedSpecies);
-  const r = isMotif || isName || spColor !== "#333" ? 3 : 2;
+  const r = isMotif || isName || spColor !== "#333" ? d : d * 0.7;
   if (node.name === state.selectedTip) {
-    fragments.push(`<circle cx="${cx}" cy="${cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+    fragments.push(`<circle cx="${cx}" cy="${cy}" r="${d * 5}" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
   }
   if (isMotif) {
     const colors = getMotifColors(node.name);
@@ -487,12 +497,13 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
     }
     if (node.layoutChildren) {
       vlinePaths.push({ x: node.x, y1: node.layoutChildren[0].y, y2: node.layoutChildren[node.layoutChildren.length - 1].y });
+      const d = state.dotSize;
       const isSelected = node.id === state.exportNodeId;
       const isShared = state.sharedNodes.has(node.id);
       dotData.push({
         cx: node.x,
         cy: node.y,
-        r: isSelected ? 6 : isShared ? 5 : 3,
+        r: isSelected ? d * 2 : isShared ? d * 1.7 : d,
         fill: isSelected ? "#000" : isShared ? "#ff6600" : "#999",
         nodeId: node.id,
         sup: node.sup,
@@ -500,6 +511,7 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
       });
       node.layoutChildren.forEach(collect);
     } else {
+      const d = state.dotSize;
       const isMotif = state.motifMatches.has(node.name);
       const isName = state.nameMatches.has(node.name);
       const spColor = getNodeColor(node, checkedSpecies);
@@ -512,10 +524,10 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
       } else {
         fill = spColor;
       }
-      const r = isMotif || isName || spColor !== "#333" ? 3 : 2;
+      const r = isMotif || isName || spColor !== "#333" ? d : d * 0.7;
       dotData.push({ cx: node.x, cy: node.y, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
       if (state.showTipLabels) {
-        tipLabels.push({ x: node.x + 4, y: node.y + 3, node });
+        tipLabels.push({ x: node.x + d + 1, y: node.y + d, node });
       }
     }
   }
@@ -565,12 +577,13 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
       const large = a2 - a1 > Math.PI ? 1 : 0;
       arcPaths.push(`M${ax1},${ay1} A${node.r},${node.r} 0 ${large},1 ${ax2},${ay2}`);
 
+      const d = state.dotSize;
       const isSelected = node.id === state.exportNodeId;
       const isShared = state.sharedNodes.has(node.id);
       dotData.push({
         cx: nx,
         cy: ny,
-        r: isSelected ? 6 : isShared ? 5 : 3,
+        r: isSelected ? d * 2 : isShared ? d * 1.7 : d,
         fill: isSelected ? "#000" : isShared ? "#ff6600" : "#999",
         nodeId: node.id,
         sup: node.sup,
@@ -578,6 +591,7 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
       });
       node.layoutChildren.forEach(collect);
     } else {
+      const d = state.dotSize;
       const isMotif = state.motifMatches.has(node.name);
       const isName = state.nameMatches.has(node.name);
       const spColor = getNodeColor(node, checkedSpecies);
@@ -590,14 +604,15 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
       } else {
         fill = spColor;
       }
-      const r = isMotif || isName || spColor !== "#333" ? 3 : 2;
+      const r = isMotif || isName || spColor !== "#333" ? d : d * 0.7;
       dotData.push({ cx: nx, cy: ny, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
       if (state.showTipLabels) {
+        const gap = d + 1;
         const deg = node.angle * 180 / Math.PI;
         const flip = (deg > 90 && deg < 270) || (deg < -90 && deg > -270);
         tipLabels.push({
-          x: nx + (flip ? -4 : 4) * Math.cos(node.angle),
-          y: ny + (flip ? -4 : 4) * Math.sin(node.angle),
+          x: nx + (flip ? -gap : gap) * Math.cos(node.angle),
+          y: ny + (flip ? -gap : gap) * Math.sin(node.angle),
           angle: flip ? deg + 180 : deg,
           anchor: flip ? "end" : "start",
           node,
@@ -642,12 +657,13 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
       return;
     }
     if (node.layoutChildren) {
+      const d = state.dotSize;
       const isSelected = node.id === state.exportNodeId;
       const isShared = state.sharedNodes.has(node.id);
       dotData.push({
         cx: node.x,
         cy: node.y,
-        r: isSelected ? 6 : isShared ? 5 : 3,
+        r: isSelected ? d * 2 : isShared ? d * 1.7 : d,
         fill: isSelected ? "#000" : isShared ? "#ff6600" : "#999",
         nodeId: node.id,
         sup: node.sup,
@@ -655,6 +671,7 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
       });
       node.layoutChildren.forEach(collect);
     } else {
+      const d = state.dotSize;
       const isMotif = state.motifMatches.has(node.name);
       const isName = state.nameMatches.has(node.name);
       const spColor = getNodeColor(node, checkedSpecies);
@@ -667,14 +684,15 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
       } else {
         fill = spColor;
       }
-      const r = isMotif || isName || spColor !== "#333" ? 3 : 2;
+      const r = isMotif || isName || spColor !== "#333" ? d : d * 0.7;
       dotData.push({ cx: node.x, cy: node.y, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
       if (state.showTipLabels) {
+        const gap = d + 1;
         const deg = node.angle * 180 / Math.PI;
         const flip = (deg > 90 && deg < 270) || (deg < -90 && deg > -270);
         tipLabels.push({
-          x: node.x + 4 * Math.cos(node.angle),
-          y: node.y + 4 * Math.sin(node.angle),
+          x: node.x + gap * Math.cos(node.angle),
+          y: node.y + gap * Math.sin(node.angle),
           angle: flip ? deg + 180 : deg,
           anchor: flip ? "end" : "start",
           node,
@@ -720,26 +738,28 @@ function emitFastTrianglesAndDots(fragments, triangles, dotData) {
     fragments.push(`<g>${circles}</g>`);
   }
 
+  const d = state.dotSize;
+  const ringR = d * 5;
   if (state.selectedTip) {
     const selectedTipDot = dotData.find(dot => dot.isTip && dot.tipName === state.selectedTip);
     if (selectedTipDot) {
-      fragments.push(`<circle cx="${selectedTipDot.cx}" cy="${selectedTipDot.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
+      fragments.push(`<circle cx="${selectedTipDot.cx}" cy="${selectedTipDot.cy}" r="${ringR}" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
     }
   }
   if (state.exportNodeId != null) {
     const selectedNodeDot = dotData.find(dot => !dot.isTip && dot.nodeId === state.exportNodeId);
     if (selectedNodeDot) {
-      fragments.push(`<circle cx="${selectedNodeDot.cx}" cy="${selectedNodeDot.cy}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
+      fragments.push(`<circle cx="${selectedNodeDot.cx}" cy="${selectedNodeDot.cy}" r="${ringR}" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
     }
   }
 
   for (const dot of dotData) {
     if (dot.isTip) continue;
     if (state.showBootstraps && dot.sup != null) {
-      fragments.push(`<text x="${dot.cx + 6}" y="${dot.cy - 5}" class="bootstrap-label">${dot.sup}</text>`);
+      fragments.push(`<text x="${dot.cx + d * 2}" y="${dot.cy - d * 1.7}" class="bootstrap-label">${dot.sup}</text>`);
     }
     if (state.nodeLabels[dot.nodeId]) {
-      fragments.push(`<text x="${dot.cx + 8}" y="${dot.cy + 4}" class="node-label">${state.nodeLabels[dot.nodeId]}</text>`);
+      fragments.push(`<text x="${dot.cx + d * 2.5}" y="${dot.cy + d * 1.3}" class="node-label">${state.nodeLabels[dot.nodeId]}</text>`);
     }
   }
 }

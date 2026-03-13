@@ -1,157 +1,99 @@
-# PhyloScope Standalone App — Implementation Plan
+# Revised Plan: Standalone PhyloScope
 
-Convert PhyloScope from a client-server app (Python FastAPI backend) to a fully standalone browser app. All server logic moves to JavaScript. The result is a folder you can open directly in a browser or host on any static server — no Python, no server, no install.
+## Summary
 
-## New Files to Create
+Convert PhyloScope to a browser-only app, but ship it as a built `browser/dist/` bundle rather than raw source files. This is the safest way to support both static hosting and direct `file://` use without the current `/static/...` and ES-module assumptions.
 
-### `browser/static/js/parsers.js` — File Parsing Module
+Keep the existing renderer and most of `tree-utils.js`; move backend-only parsing, tree mutation, export, and dataset logic into a new client-side data layer.
 
-Port all Python parsers from `app.py`:
+Do not delete `browser/app.py`, `browser/run.sh`, or `environment.yml` until the standalone bundle reaches feature parity and the docs are updated. Use the Python app as the migration oracle during implementation.
 
-1. **`parseNewick(nwkString)`** — Port of `_parse_newick()` and `_parse_node()` (app.py lines 57-118). Recursive descent parser. Use a closure or passed counter object instead of the global `_node_counter`. Output the slim JSON format (`{id, bl, name, sup, sp, ch}`) directly, matching the existing wire format so the renderer can consume it unchanged.
+## Key Changes
 
-2. **`parseFasta(fastaText)`** — Port of `parse_fasta()` (app.py lines 124-136). Line-by-line parsing, returns `{header: sequence}` dict.
+### Runtime and packaging
 
-3. **`prositeToRegex(pattern)`** — Port of `prosite_to_regex()` (app.py lines 241-276). Converts PROSITE notation to JS regex strings (`x` → `.`, `{ABC}` → `[^ABC]`, etc.).
+- Add a small dev-only build step with esbuild and a `browser/package.json`.
+- Source remains modular under `browser/static/js/`; build output is a bundled `browser/dist/index.html`, `app.bundle.js`, `style.css`, `logo.png`, `jspdf.umd.min.js`, and `svg2pdf.umd.min.js`.
+- Remove absolute `/static/...` references in source templates; emitted bundle uses relative paths only.
+- **Acceptance criterion:** opening `browser/dist/index.html` must make zero `/api/...` requests and zero absolute `/static/...` requests.
 
-4. **`parseDatasetFile(tsvText, treeData)`** — Port of `parse_dataset_file()` (app.py lines 326-387) and `parse_numeric_value()` (app.py lines 310-322). Tab-delimited parsing with tip cross-referencing.
+### Client data layer
 
-### `browser/static/js/tree-ops.js` — Tree Operations Module
+- Add `browser/static/js/parsers.js` with `parseNewick`, `parseFastaText`, `parseNumericValue`, `parseDatasetText`, and `prositeToRegex`.
+- Add `browser/static/js/tree-ops.js` with `annotateSpecies`, `buildSpeciesMapFromFiles`, `findNodesWithSpecies`, `rerootTree`, `nodeToNewick`, `refPosToColumns`, `computePairwiseIdentity`, and `buildExportFasta`.
+- Keep the canonical tree shape as the current frontend wire format: `{ id, bl, name?, sup?, sp?, ch? }`. Internal-only annotations may add `descendantSpecies`.
+- Reuse existing helpers in `tree-utils.js` for indexing, copying, tip collection, and patristic distance rather than reimplementing them.
 
-Port tree-manipulation algorithms from `app.py`:
+### Loading flow and UI
 
-1. **`rerootTree(treeData, targetId)`** — Port of `reroot_tree()` (app.py lines 513-593). The most complex algorithm. Steps: build parent map, find path to target, reverse parent-child relationships, fix branch lengths, collapse degree-2 old root, re-assign IDs. Operates on `{id, bl, name, sup, sp, ch}` nodes.
+Replace path-entry and server-side browse UI with:
 
-2. **`annotateSpecies(node, tipToSpecies)`** — Port of `annotate_species()` (app.py lines 199-210). Adds `sp` to tips and `descendant_species` arrays to internal nodes.
+- **Primary:** folder picker using `<input type="file" webkitdirectory multiple>`.
+- **Secondary fallback:** multi-file picker for users who cannot provide a recursive folder selection.
+- **Optional enhancement:** drag-and-drop, but only if implemented with the browser's directory APIs; it is not required for parity.
 
-3. **`findNodesWithSpecies(node, requiredSpecies, excludedSpecies)`** — Port of `find_nodes_with_species()` (app.py lines 216-235). Recursive walk returning node IDs.
+Keep the detected-files panel, but convert tree/alignment fields from free-text inputs to selectors:
 
-4. **`nodeToNewick(node)`** — Port of `node_to_newick()` (app.py lines 606-621). Recursive conversion back to Newick string.
+- **Tree:** required, user must choose one `.nwk` if multiple are present.
+- **Alignment:** optional, default to the first `.aa.fa`, with an explicit "None" choice.
 
-5. **`buildSpeciesMap(treeData, speciesFileContents)`** — Adapted port of `build_species_map()` (app.py lines 142-193). Input is an array of `{filename, text}` objects from the file picker. Preserves the hardcoded `REF_SPECIES` dict and `new_genomes.` prefix parsing.
+`file-loader.js` should scan files by relative path, build an in-memory workspace, and populate state with raw texts, parsed data, and lazy dataset handles.
 
-6. **`refPosToColumns(refSeqGapped, refStart, refEnd)`** — Port of `ref_pos_to_columns()` (app.py lines 624-637). Maps 1-indexed reference positions to alignment column indices.
+`state.js` should remove `inputDir`, `browserCurrentDir`, and `browserParentDir`, and add:
 
-### `browser/static/js/file-loader.js` — File Loading Module
+- `loaded`, `gene`, `nwkName`, `aaName`, `numSeqs`, `numSpecies`
+- `proteinSeqs`, `proteinSeqsUngapped`, `tipLengths`
+- `sourceFiles` or equivalent raw-text/file-handle store
+- `datasetFileObjects`, `parsedDatasets`
 
-Handles the browser File API workflow:
+`init()` becomes a state/bootstrap routine with no status fetch. `checkStatus()` becomes "show setup or restore session" logic only.
 
-1. **`loadFromFiles(fileList)`** — Main entry point. Given a `FileList` from `<input type="file" webkitdirectory>` or drag-and-drop:
-   - Scans for `.nwk`, `.aa.fa`, `orthofinder-input/`, `dataset/` files using `webkitRelativePath`
-   - Reads and parses tree, alignment, species mapping
-   - Calls `annotateSpecies()` if species data available
-   - Populates client `state` with all parsed data
+### Behavior replacement
 
-2. **`detectFiles(fileList)`** — Scans a FileList, returns `{nwkFiles, aaFiles, hasOrtho, datasetFiles}` for the setup UI preview.
+Replace every `fetch("/api/...")` flow in `actions.js` with local helpers:
 
-## Files to Modify
+- `loadTipDatalist`, `copyTipFasta`, `openExportPanel`, `searchMotif`, `highlightSharedNodes`, `comparePairwise`, `refreshDatasetList`, `loadHeatmapDataset`, `doExport`, `exportNewick`, `copyNewick`, `rerootAt`, setup load/reset.
 
-### `browser/static/index.html` — Setup UI Redesign
+Keep dataset loading lazy:
 
-- Remove the path text input (`#setup-path`), Browse button (`#setup-browse`), and `#setup-browser` panel
-- Add a drag-and-drop zone (large bordered area)
-- Add a folder picker button: `<input type="file" webkitdirectory multiple>`
-- Keep the detected files panel (`#detected-files`), populated from client-side scanning
-- Keep "Load saved session" button (behavior changes — see session handling)
-- Change all `/static/` prefixed paths to relative paths so it works from `file://`
+- Store dataset files in state.
+- Parse on first use.
+- Cache parsed results by dataset name.
 
-### `browser/static/js/state.js` — New State Fields
+After reroot, re-annotate species, rebuild node indexes, clear subtree/full-tree view as the current UI already expects.
 
-Add:
-- `state.loaded` — boolean (replaces `/api/status` check)
-- `state.proteinSeqs` — `{tipName: gappedSequence}`
-- `state.proteinSeqsUngapped` — `{tipName: ungappedSequence}`
-- `state.gene`, `state.nwkName`, `state.aaName` — metadata strings
-- `state.numSeqs`, `state.numSpecies` — counts
-- `state.datasetFileObjects` — array of `{name, file}` for lazy loading
-- `state.parsedDatasets` — cache of parsed dataset files
+Undo/redo and sessions must use the same client-owned tree state, which also fixes the current client/server drift after rerooting.
 
-Remove:
-- `state.inputDir`, `state.browserCurrentDir`, `state.browserParentDir`
+### Sessions and compatibility
 
-Update `resetClientState()` to cover all new fields.
+Replace the current path-based session format with **version: 2** self-contained sessions.
 
-### `browser/static/js/actions.js` — Replace All 22 Fetch Calls
+v2 session payload must include:
 
-Every `fetch("/api/...")` call becomes a direct call to a client-side function:
+- **Source texts:** selected `.nwk`, optional `.aa.fa`, all orthofinder species FASTAs needed for mapping, and all dataset `.txt` files so the restored session keeps the dataset picker functional.
+- **View state:** current `treeData`, optional `fullTreeData`, collapsed nodes, labels, hidden tips, selected/export node, zoom/pan, layout toggles, checked/excluded species, motifs, active heatmaps.
 
-| Function | Current fetch | Replacement |
-|---|---|---|
-| `init()` | `/api/status`, `/api/tree`, `/api/species`, `/api/tip-lengths` | Read directly from state (already populated by `loadFromFiles()`) |
-| `loadTipDatalist()` | `/api/tip-names` | `Object.keys(state.proteinSeqs).sort()` |
-| `rerootAt()` | `POST /api/reroot` | Call `rerootTree()` + `annotateSpecies()` from tree-ops.js |
-| `copyTipFasta()` | `/api/tip-seq` | Read from `state.proteinSeqsUngapped[tipName]` |
-| `copyNodeFasta()` | `/api/export` | Build FASTA from `state.proteinSeqs` + `collectAllTipNames()` |
-| `openExportPanel()` | `/api/node-tips` | `collectAllTipNames(state.nodeById[nodeId])` |
-| `searchMotif()` | `/api/motif` | `prositeToRegex()` + regex search over `state.proteinSeqsUngapped` |
-| `highlightSharedNodes()` | `/api/nodes-by-species` | `findNodesWithSpecies()` from tree-ops.js |
-| `comparePairwise()` | `/api/pairwise` | Client-side identity calc from `state.proteinSeqs` |
-| `refreshDatasetList()` | `/api/datasets` | Read from `state.datasetFileObjects` |
-| `loadHeatmapDataset()` | `/api/dataset` | Read File object + `parseDatasetFile()` |
-| `doExport()` | `/api/export?...` | Build FASTA client-side, download via blob URL |
-| `exportNewick()` | `/api/export-newick` | `nodeToNewick()` + blob download |
-| `copyNewick()` | `/api/export-newick` | `nodeToNewick()` + clipboard write |
-| `doSetupLoad()` | `POST /api/load` | Complete rewrite using File API |
-| `browserNavigate()` | `/api/browse` | Remove entirely |
-| `scanFolder()` | `/api/browse-files` | Remove; replaced by `detectFiles()` |
-| `loadSession()` | `POST /api/load` (re-load) | Redesigned — see session handling |
-| `saveSession()` | (saves inputDir) | Redesigned — embed raw data |
-| `bindStartupControls()` reset handler | `POST /api/reset` | `resetClientState()` + `clearUiForReset()` |
+This is a deliberate change from the current app: sessions should restore rerooted and subtree-focused state, not just the original input location.
 
-### `browser/static/style.css`
+Support old **version: 1** sessions as best-effort import:
 
-- Add drag-drop zone styles (highlighted border on dragover, visual feedback)
-- Remove unused server-browser panel styles
-
-## Data Loading Flow (New)
-
-1. User drags folder onto drop zone or clicks "Select folder"
-2. `<input type="file" webkitdirectory>` fires `change` with a `FileList`
-3. `detectFiles(fileList)` scans via `file.webkitRelativePath` to find `.nwk`, `.aa.fa`, `orthofinder-input/`, `dataset/` files
-4. Preview shown in detected-files panel; user confirms
-5. `loadFromFiles()` reads each file via `await file.text()` and parses everything
-6. All results stored directly in client `state`
-7. `init()` reads from state instead of fetching from server
-
-## Edge Cases and Tricky Parts
-
-### Session Save/Load Without Server
-
-Current sessions store `inputDir` and rely on the server to reload. New approach: embed raw Newick text and FASTA text in the session JSON so sessions are self-contained. Potentially large (tens of MB for big alignments) but practical. Store raw strings (not parsed objects) to keep JSON smaller.
-
-### Reroot Mutates State
-
-After rerooting, the server re-annotates species (app.py lines 777-778). The client-side reroot must also call `annotateSpecies()` on the new root. The undo system already calls `deepCopyNode()` before reroot, so mutation is safe.
-
-### Species Mapping Has Hardcoded Rules
-
-`build_species_map()` uses a `REF_SPECIES` dict and `new_genomes.` prefix parsing (app.py lines 164-177). Port these rules exactly for backward compatibility.
-
-### Dataset Loading Should Stay Lazy
-
-Dataset files are loaded on-demand when the user clicks "Add" for a heatmap. Keep `File` objects in `state.datasetFileObjects` and parse only when requested.
-
-### webkitdirectory Browser Support
-
-Supported in Chrome, Edge, Firefox, and Safari. Not a formal standard but has broad support. Should also support individual file selection as a fallback.
-
-### file:// Protocol
-
-ES module imports work from `file://` in modern browsers. All paths must be relative. Single-directory structure with `index.html` alongside the other files.
+- Read their UI settings.
+- Prompt the user to provide the source files/folder manually.
+- Apply only the settings that still map cleanly after load.
 
 ## Implementation Order
 
 ### Phase 1: Core Parsers
-Create `parsers.js`: `parseNewick()`, `parseFasta()`, `prositeToRegex()`, `parseDatasetFile()`. Test by importing in browser console with sample data.
+Create `parsers.js`: `parseNewick()`, `parseFastaText()`, `prositeToRegex()`, `parseNumericValue()`, `parseDatasetText()`. Test by comparing output against the Python app with `example_data/`.
 
 ### Phase 2: Tree Operations
-Create `tree-ops.js`: `nodeToNewick()`, `findNodesWithSpecies()`, `annotateSpecies()`, `buildSpeciesMap()`, `rerootTree()` (hardest), `refPosToColumns()`.
+Create `tree-ops.js`: `nodeToNewick()`, `findNodesWithSpecies()`, `annotateSpecies()`, `buildSpeciesMapFromFiles()`, `rerootTree()` (hardest), `refPosToColumns()`, `computePairwiseIdentity()`, `buildExportFasta()`.
 
 ### Phase 3: File Loading Infrastructure
 Create `file-loader.js`: `detectFiles()`, `loadFromFiles()`. Wires together parsers and tree-ops.
 
 ### Phase 4: Replace All Fetch Calls in actions.js
-Replace all 22 `fetch("/api/...")` calls with local function calls. Work from simplest to most complex:
+Replace all `fetch("/api/...")` calls with local function calls. Work from simplest to most complex:
 1. Simple reads: `refreshDatasetList`, `loadTipDatalist`, `openExportPanel`
 2. Computation: `searchMotif`, `highlightSharedNodes`, `comparePairwise`
 3. Export: `doExport`, `exportNewick`, `copyNewick`, `copyTipFasta`, `copyNodeFasta`
@@ -159,17 +101,58 @@ Replace all 22 `fetch("/api/...")` calls with local function calls. Work from si
 5. Loading flow: `doSetupLoad`, `init`, `checkStatus`, `loadSession`
 
 ### Phase 5: Setup UI Redesign
-Modify `index.html`: drag-drop zone + folder picker. Wire events in `actions.js` `bindStartupControls()`.
+Modify `index.html`: folder picker + multi-file fallback. Wire events in `actions.js` `bindStartupControls()`.
 
 ### Phase 6: Session Handling
-Redesign `saveSession()` and `loadSession()` to embed raw data in session files.
+Redesign `saveSession()` and `loadSession()` to use v2 self-contained format with v1 backward compat.
 
-### Phase 7: Static Path Cleanup
-Change all `/static/` paths to relative. Restructure files if needed so `index.html` can be opened directly.
+### Phase 7: Build Pipeline
+Add `browser/package.json` with esbuild. Build to `browser/dist/` with bundled HTML, JS, CSS, and assets. Relative paths only.
 
 ### Phase 8: Cleanup
-Delete `app.py`, `run.sh`, `environment.yml` (or archive). Update README.
+Update README. Keep `app.py`, `run.sh`, `environment.yml` in-repo until parity is confirmed.
+
+## Test Plan
+
+Parity-check the standalone app against the current FastAPI app using `example_data/`.
+
+Verify these outputs match between old and new implementations:
+
+- tree parse shape
+- species mapping
+- motif matches
+- shared-node results
+- reroot result
+- pairwise identity
+- dataset parsing summary
+- FASTA export
+- Newick export
+
+Run full UI regressions:
+
+- load data
+- select node and copy/export
+- reroot
+- undo/redo
+- subtree focus and return
+- motif search
+- heatmap add/remove
+- session save/load
+- reset and reload
+
+Distribution smoke tests:
+
+- open `browser/dist/index.html` directly from disk
+- serve `browser/dist/` from a simple static server
+- confirm no backend dependency in either case
+
+## Assumptions
+
+- A dev-time build dependency is acceptable; the no-install goal applies to end users of the shipped app, not contributors.
+- Session files may become large because they are self-contained; compression and "lightweight session" variants are out of scope for this pass.
+- Drag-and-drop directory loading is a nice-to-have, not the primary compatibility path.
+- Backend cleanup happens only after the standalone bundle is verified; until then, the Python app remains in-repo as the reference implementation.
 
 ## End Result
 
-A folder you can open directly in a browser or host on any static server. No Python, no server, no install required. Could be zipped into a single distributable archive.
+A `browser/dist/` folder you can open directly in a browser or host on any static server. No Python, no server, no install required. Could be zipped into a single distributable archive.

@@ -4,9 +4,9 @@
 
 # PhyloScope
 
-A lightweight, local-first phylogenetic tree viewer with built-in sequence tools. Built with FastAPI (Python) and vanilla JS/SVG.
+A lightweight, local-first phylogenetic tree viewer with built-in sequence tools. Runs entirely in the browser — no server, no install required.
 
-The frontend is organized as small ES modules: shared state, tree utilities, rendering, and UI actions are split into focused files under `browser/static/js/`.
+The frontend is organized as small ES modules under `browser/static/js/`, bundled into a single distributable folder (`docs/`) via esbuild.
 
 ![PhyloScope screenshot](screenshot.png)
 
@@ -14,7 +14,7 @@ The frontend is organized as small ES modules: shared state, tree utilities, ren
 
 | Feature | PhyloScope | iTOL | FigTree | ETE Toolkit | Dendroscope |
 |---|---|---|---|---|---|
-| Hosting | Local, self-hosted | Cloud (freemium) | Desktop (Java) | Python library | Desktop (Java) |
+| Hosting | Local, standalone HTML | Cloud (freemium) | Desktop (Java) | Python library | Desktop (Java) |
 | Species coloring | Built-in from FASTA inputs | Manual annotation files | Manual | Programmatic | Manual node/edge formatting |
 | Motif search | Regex + PROSITE, multi-motif with per-motif colors | No | No | Programmatic | No |
 | Shared node finding | Built-in species filter with exclusion | No | No | Scriptable | No |
@@ -23,78 +23,38 @@ The frontend is organized as small ES modules: shared state, tree utilities, ren
 | Annotation | Species, bootstrap, motif highlights, sequence lengths, clade labels | Very rich (heatmaps, domains, bars) | Moderate | Very rich | Basic (colors, fonts, line widths) |
 | Large trees (10k+) | Fast mode: batched SVG, auto-collapse, render cache | Optimized for large trees | Moderate | Good | Optimized (magnifier tool) |
 | Undo/redo | Full undo/redo for tree operations | No | Limited | No | No |
-| Session persistence | Save/load all UI state to JSON | Server-side projects | Save to NEXUS | Scriptable | Save to file |
+| Session persistence | Save/load all UI state + data to JSON | Server-side projects | Save to NEXUS | Scriptable | Save to file |
 | Tip filtering | Regex and species-based hide/show | Dataset filtering | Taxon filtering | Programmatic | Find/filter |
 | Pairwise comparison | Patristic distance + sequence identity | No | No | Programmatic | No |
 | PDF export | Vector PDF via jsPDF/svg2pdf | PNG/SVG/PDF | PDF/SVG/PNG | PNG/SVG/PDF | PDF/SVG/PNG |
 
-## Installation
-
-The app requires Python 3.10+ with **fastapi** and **uvicorn**.
-
-### Option A: micromamba / conda (recommended)
-
-```bash
-# Install micromamba if you don't have it:
-# Linux/WSL
-curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C ~/.local/bin --strip-components=1 bin/micromamba
-# macOS (Intel)
-curl -Ls https://micro.mamba.pm/api/micromamba/osx-64/latest | tar -xvj -C ~/.local/bin --strip-components=1 bin/micromamba
-# macOS (Apple Silicon)
-curl -Ls https://micro.mamba.pm/api/micromamba/osx-arm64/latest | tar -xvj -C ~/.local/bin --strip-components=1 bin/micromamba
-
-# Create a new environment
-micromamba create -f environment.yml -y
-micromamba activate tree-browser
-
-# Or update an existing environment
-micromamba install -f environment.yml -n tree-browser -y
-```
-
-### Option B: pip
-
-```bash
-pip install fastapi uvicorn
-```
-
-### Option C: System packages
-
-**Debian/Ubuntu/WSL:**
-```bash
-sudo apt install python3 python3-pip
-pip install fastapi uvicorn
-```
-
-**macOS (Homebrew):**
-```bash
-brew install python
-pip3 install fastapi uvicorn
-```
-
-**Windows (native):**
-```powershell
-# Install Python from https://www.python.org/downloads/ then:
-pip install fastapi uvicorn
-```
-
 ## Quick Start
+
+Open `docs/index.html` in any modern browser. That's it — no server, no install.
+
+You can also serve it from any static file server (e.g. `python3 -m http.server -d docs`).
+
+## Building from Source
+
+If you want to rebuild the bundle after modifying source files:
 
 ```bash
 cd browser
-./run.sh
-# or manually:
-micromamba run -n tree-browser python3 app.py
-# or without micromamba:
-python3 app.py
+npm install    # one-time: installs esbuild
+npm run build  # bundles to docs/
 ```
 
-Then open http://localhost:8000.
+Requires Node.js 16+.
 
 ## Getting Started
 
-On launch, a setup dialog prompts for an input folder path. You can type a path directly or click **Browse** to navigate the filesystem visually. The browser shows a green checkmark when the current directory contains valid input files, and the **Select** button fills the path for you.
+On launch, a setup dialog lets you load your data:
 
-You can also click **Load saved session** to restore a previously saved session file, which automatically loads the original data folder and restores all UI state.
+- **Choose Folder**: select a folder containing your input files (uses the browser's folder picker)
+- **Choose Files**: select individual files if folder picking isn't available in your browser
+- **Load saved session**: restore a previously saved session file, which includes all data and UI state
+
+After selecting files, PhyloScope detects and categorizes them. Choose the tree and alignment files from the dropdowns if multiple are present, then click **Load**.
 
 ## Input Folder Structure
 
@@ -102,8 +62,8 @@ Point PhyloScope at any folder containing:
 
 | File | Description |
 |------|-------------|
-| `*.nwk` | Newick tree (exactly one) |
-| `*.aa.fa` | Gapped protein alignment (exactly one, optional) |
+| `*.nwk` | Newick tree (exactly one, required) |
+| `*.aa.fa` | Gapped protein alignment (optional) |
 | `orthofinder-input/*.fa` | Per-species FASTA files for tip-to-species mapping (optional) |
 | `dataset/*.txt` | Tab-delimited tip datasets for rectangular heatmap display (optional) |
 
@@ -112,7 +72,7 @@ An example dataset is provided in `example_data/`.
 ## Features
 
 ### Loaded Data Panel
-- Shows currently loaded tree file (with tip count), alignment file, species count, and input folder at the top of the sidebar
+- Shows currently loaded tree file (with tip count), alignment file, and species count at the top of the sidebar
 - **Load different data** button resets all state and re-opens the setup dialog
 
 ### Tree Display
@@ -198,8 +158,8 @@ An example dataset is provided in `example_data/`.
 
 ### Pairwise Compare
 - Select two tips (with autocomplete) and click **Compare** to see:
-  - **Patristic distance**: sum of branch lengths from each tip to their LCA (computed client-side)
-  - **Sequence identity**: percentage of identical positions at ungapped alignment columns (computed server-side, requires alignment)
+  - **Patristic distance**: sum of branch lengths from each tip to their LCA
+  - **Sequence identity**: percentage of identical positions at ungapped alignment columns (requires alignment)
 
 ### Heatmap
 - Load optional tab-delimited files from `dataset/*.txt`
@@ -233,73 +193,55 @@ An example dataset is provided in `example_data/`.
   - **Copy to clipboard**: copy the Newick string directly
 
 ### Session Save / Load
-- **Save session**: downloads a JSON file with all UI state — collapsed nodes, clade labels, species selections, motif searches, tip filters, layout settings, zoom/pan, and the input folder path
-- **Load session**: pick a session file to restore all state; also available from the setup dialog to resume without re-entering the data path
+- **Save session**: downloads a self-contained JSON file with all source data (tree, alignment, species files, datasets) and full UI state — collapsed nodes, clade labels, species selections, motif searches, tip filters, layout settings, zoom/pan, rerooted tree state
+- **Load session**: pick a session file to restore all state; also available from the setup dialog
+- Sessions are self-contained — they include the original data, so they can be loaded without access to the original files
+- Old v1 sessions (from the server-based version) are supported as best-effort import: UI settings are applied after you load the source files manually
 
-## API Endpoints
+## Legacy Server Mode
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/browse?path=...` | List subdirectories, detect valid input files |
-| `POST /api/load` | Load an input folder (`{"input_dir": "..."}`) |
-| `GET /api/status` | Check if data is loaded |
-| `GET /api/tree` | Full tree as JSON |
-| `GET /api/species` | Species list and species-to-tips mapping |
-| `GET /api/tip-lengths` | Ungapped amino acid lengths for all tips |
-| `GET /api/tip-seq?name=...` | Ungapped sequence for a single tip |
-| `GET /api/motif?pattern=...&type=regex` | Motif search (regex or prosite) |
-| `GET /api/nodes-by-species?species=X&exclude=Y` | Find nodes with required/excluded species |
-| `GET /api/node-tips?node_id=N` | List descendant tip names for a node |
-| `GET /api/tip-names` | All tip names (for autocomplete) |
-| `GET /api/datasets` | List available dataset files in `dataset/` |
-| `GET /api/dataset?name=...` | Load parsed heatmap data for one dataset file |
-| `GET /api/export?node_id=N&...` | Download gapped FASTA for a subtree |
-| `GET /api/export-newick?node_id=N` | Download subtree as Newick string |
-| `GET /api/pairwise?tip1=X&tip2=Y` | Pairwise sequence identity between two tips |
-| `POST /api/reroot` | Re-root tree at a node (`{"node_id": N}`) |
-| `POST /api/reset` | Reset server state to load new data |
-
-## Verification
-
-Run the lightweight backend smoke test after refactors:
+The original FastAPI server (`browser/app.py`) remains in the repository as a reference implementation. To run it:
 
 ```bash
+# Requires Python 3.10+ with fastapi and uvicorn
 cd browser
-python verify_refactor.py
+python3 app.py
+# Then open http://localhost:8000
 ```
 
-The script builds a tiny temporary fixture, loads it through the backend helpers, and verifies core flows such as load, species mapping, motif search, pairwise identity, subtree export, and reset.
-
-### Export Parameters
-
-| Parameter | Description |
-|-----------|-------------|
-| `node_id` | Required. Internal node ID |
-| `extra_tips` | Optional. Additional tip names (repeatable) |
-| `col_start`, `col_end` | Optional. 1-indexed alignment column range |
-| `ref_seq` | Optional. Reference sequence name |
-| `ref_start`, `ref_end` | Optional. 1-indexed residue positions in the reference |
+See `environment.yml` for a conda/micromamba environment spec.
 
 ## Project Structure
 
 ```
 logo.png              # PhyloScope logo
-environment.yml       # Conda/micromamba environment spec
+environment.yml       # Conda/micromamba environment spec (legacy server mode)
+docs/                 # Built standalone app (open index.html)
+  index.html
+  app.bundle.js
+  style.css
+  logo.png
+  jspdf.umd.min.js
+  svg2pdf.umd.min.js
 browser/
-  app.py              # FastAPI backend
-  run.sh              # Launch script
-  verify_refactor.py  # Lightweight backend smoke test
-  static/
-    index.html        # Single-page app
-    app.js            # Frontend bootstrap
+  app.py              # FastAPI backend (legacy server mode)
+  run.sh              # Server launch script (legacy)
+  package.json        # Node.js build config
+  build.js            # esbuild bundler script
+  static/             # Source files
+    index.html        # Single-page app template
+    app.js            # Frontend bootstrap (ES module entry point)
     style.css         # Styling
     logo.png          # Cropped logo for sidebar
     jspdf.umd.min.js  # jsPDF library (bundled)
     svg2pdf.umd.min.js # svg2pdf.js library (bundled)
     js/
       actions.js      # UI actions, setup flow, and event wiring
+      file-loader.js  # File picker handling and data loading
+      parsers.js      # Newick, FASTA, PROSITE, and dataset parsers
       renderer.js     # Tree layout/rendering and export SVG helpers
       state.js        # Shared frontend state and DOM references
+      tree-ops.js     # Tree mutation, species mapping, and export helpers
       tree-utils.js   # Tree traversal, indexing, and distance helpers
 example_data/         # Example tree, alignment, and species data
 ```

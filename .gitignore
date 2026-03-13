@@ -20,3 +20,7 @@ Thumbs.db
 /*/
 !example_data/
 !browser/
+!docs/
+
+# Build artifacts
+browser/node_modules/

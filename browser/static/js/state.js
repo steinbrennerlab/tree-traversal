@@ -1,49 +1,84 @@
 export const state = {
+  // Data loading
+  loaded: false,
+  gene: null,
+  nwkName: null,
+  aaName: null,
+  numSeqs: 0,
+  numSpecies: 0,
+
+  // Tree data
   treeData: null,
+  fullTreeData: null,
+  nodeById: {},
+  parentMap: {},
+
+  // Protein sequences (client-side)
+  proteinSeqs: null,
+  proteinSeqsUngapped: null,
+
+  // Source texts (for sessions)
+  sourceTexts: null,
+
+  // Dataset storage
+  datasetFiles: [],
+  datasetTextsByName: {},
+  parsedDatasets: {},
+  activeHeatmaps: [],
+
+  // Species & sequences
   speciesMap: {},
   tipToSpecies: {},
   speciesColors: {},
+  allTipNames: [],
+  tipLengths: {},
+  hasFasta: false,
+
+  // Selections & highlights
+  selectedNodeTips: [],
+  selectedTip: null,
+  exportNodeId: null,
   nameMatches: new Set(),
   motifMatches: new Set(),
   sharedNodes: new Set(),
-  collapsedNodes: new Set(),
-  nodeById: {},
-  tipLengths: {},
-  selectedNodeTips: [],
   motifList: [],
-  showLengths: false,
-  usePhylogram: true,
-  tipSpacing: 16,
-  layoutMode: "rectangular",
-  showTipLabels: true,
-  tipLabelSize: 10,
-  showBootstraps: false,
-  uniformTriangles: false,
-  triangleScale: 100,
-  exportNodeId: null,
-  allTipNames: [],
-  fullTreeData: null,
-  hasFasta: false,
-  fastMode: false,
-  selectedTip: null,
-  renderCache: null,
-  renderCacheKey: null,
+
+  // Tree view state
+  collapsedNodes: new Set(),
   hiddenTips: new Set(),
   nodeLabels: {},
-  parentMap: {},
-  undoStack: [],
-  redoStack: [],
-  inputDir: "",
+
+  // Layout & render
+  layoutMode: "rectangular",
+  usePhylogram: true,
+  showTipLabels: true,
+  tipLabelSize: 10,
+  dotSize: 3,
+  showBootstraps: false,
+  showLengths: false,
+  tipSpacing: 16,
+  triangleScale: 100,
+  uniformTriangles: false,
+  fastMode: false,
+
+  // Pan/zoom
   scale: 1,
   tx: 20,
   ty: 20,
   dragging: false,
   dragStartX: 0,
   dragStartY: 0,
-  browserCurrentDir: null,
-  browserParentDir: null,
-  datasetFiles: [],
-  activeHeatmaps: [],
+
+  // Render optimization
+  renderCache: null,
+  renderCacheKey: null,
+
+  // Undo/redo
+  undoStack: [],
+  redoStack: [],
+
+  // Staged files from picker (before Load)
+  stagedFiles: null,
 };
 
 export const dom = {
@@ -51,20 +86,16 @@ export const dom = {
   group: document.getElementById("tree-group"),
   tooltip: document.getElementById("tooltip"),
   setupOverlay: document.getElementById("setup-overlay"),
-  setupPathInput: document.getElementById("setup-path"),
   setupLoadBtn: document.getElementById("setup-load"),
   setupError: document.getElementById("setup-error"),
-  browserPanel: document.getElementById("setup-browser"),
-  browserDirList: document.getElementById("browser-dir-list"),
-  browserCurrentPath: document.getElementById("browser-current-path"),
-  browserUpBtn: document.getElementById("browser-up"),
-  browserSelectBtn: document.getElementById("browser-select"),
-  browserValidIndicator: document.getElementById("browser-valid-indicator"),
+  folderPicker: document.getElementById("folder-picker"),
+  filePicker: document.getElementById("file-picker"),
   detectedFilesPanel: document.getElementById("detected-files"),
-  detectedNwkInput: document.getElementById("detected-nwk"),
-  detectedAaInput: document.getElementById("detected-aa"),
+  detectedNwkSelect: document.getElementById("detected-nwk"),
+  detectedAaSelect: document.getElementById("detected-aa"),
   detectedOrthoSpan: document.getElementById("detected-ortho"),
   detectedDatasetSpan: document.getElementById("detected-datasets"),
+  setupLoadRow: document.getElementById("setup-load-row"),
 };
 
 export const PALETTE = [
@@ -95,49 +126,59 @@ export function getInlineStyles() {
 }
 
 export function resetClientState() {
+  state.loaded = false;
+  state.gene = null;
+  state.nwkName = null;
+  state.aaName = null;
+  state.numSeqs = 0;
+  state.numSpecies = 0;
   state.treeData = null;
+  state.fullTreeData = null;
+  state.nodeById = {};
+  state.parentMap = {};
+  state.proteinSeqs = null;
+  state.proteinSeqsUngapped = null;
+  state.sourceTexts = null;
+  state.datasetFiles = [];
+  state.datasetTextsByName = {};
+  state.parsedDatasets = {};
+  state.activeHeatmaps = [];
   state.speciesMap = {};
   state.tipToSpecies = {};
   state.speciesColors = {};
+  state.allTipNames = [];
+  state.tipLengths = {};
+  state.hasFasta = false;
+  state.selectedNodeTips = [];
+  state.selectedTip = null;
+  state.exportNodeId = null;
   state.nameMatches = new Set();
   state.motifMatches = new Set();
   state.sharedNodes = new Set();
-  state.collapsedNodes = new Set();
-  state.nodeById = {};
-  state.tipLengths = {};
-  state.selectedNodeTips = [];
   state.motifList = [];
-  state.showLengths = false;
-  state.usePhylogram = true;
-  state.tipSpacing = 16;
-  state.layoutMode = "rectangular";
-  state.showTipLabels = true;
-  state.tipLabelSize = 10;
-  state.showBootstraps = false;
-  state.uniformTriangles = false;
-  state.triangleScale = 100;
-  state.exportNodeId = null;
-  state.allTipNames = [];
-  state.fullTreeData = null;
-  state.hasFasta = false;
-  state.fastMode = false;
-  state.selectedTip = null;
-  state.renderCache = null;
-  state.renderCacheKey = null;
+  state.collapsedNodes = new Set();
   state.hiddenTips = new Set();
   state.nodeLabels = {};
-  state.parentMap = {};
-  state.undoStack = [];
-  state.redoStack = [];
-  state.inputDir = "";
+  state.layoutMode = "rectangular";
+  state.usePhylogram = true;
+  state.showTipLabels = true;
+  state.tipLabelSize = 10;
+  state.dotSize = 3;
+  state.showBootstraps = false;
+  state.showLengths = false;
+  state.tipSpacing = 16;
+  state.triangleScale = 100;
+  state.uniformTriangles = false;
+  state.fastMode = false;
   state.scale = 1;
   state.tx = 20;
   state.ty = 20;
   state.dragging = false;
   state.dragStartX = 0;
   state.dragStartY = 0;
-  state.browserCurrentDir = null;
-  state.browserParentDir = null;
-  state.datasetFiles = [];
-  state.activeHeatmaps = [];
+  state.renderCache = null;
+  state.renderCacheKey = null;
+  state.undoStack = [];
+  state.redoStack = [];
+  state.stagedFiles = null;
 }

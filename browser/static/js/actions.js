@@ -13,23 +13,24 @@ import {
   invalidateRenderCache,
   renderTree,
 } from "./renderer.js";
+import { parseDatasetText, prositeToRegex } from "./parsers.js";
+import {
+  annotateSpecies,
+  buildExportFasta,
+  computePairwiseIdentity,
+  findNodesWithSpecies,
+  nodeToNewick,
+  refPosToColumns,
+  rerootTree,
+} from "./tree-ops.js";
+import { detectFiles, loadFromFiles, loadFromSourceTexts } from "./file-loader.js";
 
 let controlsBound = false;
 let startupBound = false;
 
-function getStatusSummary(status) {
-  return {
-    loaded: true,
-    has_fasta: state.hasFasta,
-    gene: status.gene,
-    input_dir: state.inputDir,
-    num_seqs: status.num_seqs,
-    num_species: status.num_species,
-    nwk_name: status.nwk_name,
-    aa_name: status.aa_name,
-    num_datasets: status.num_datasets,
-  };
-}
+// ---------------------------------------------------------------------------
+// UI helpers (unchanged)
+// ---------------------------------------------------------------------------
 
 function clearUiForReset() {
   dom.group.innerHTML = "";
@@ -196,27 +197,44 @@ function buildHeatmapColumnListElement(heatmap) {
   return container;
 }
 
-async function refreshDatasetList() {
-  const resp = await fetch("/api/datasets");
-  const data = await resp.json();
-  state.datasetFiles = data.datasets || [];
+// ---------------------------------------------------------------------------
+// Dataset loading (local, replacing fetch)
+// ---------------------------------------------------------------------------
+
+function refreshDatasetList() {
   populateDatasetSelect();
   updateHeatmapStatus();
 }
 
-async function loadHeatmapDataset(name, preserveColumns = false, presetColumns = []) {
+function loadHeatmapDataset(name, preserveColumns = false, presetColumns = []) {
   if (!name) return;
   const existing = state.activeHeatmaps.find(heatmap => heatmap.name === name);
   if (existing && !preserveColumns) {
     document.getElementById("heatmap-status").textContent = `${name} is already loaded`;
     return;
   }
-  const resp = await fetch(`/api/dataset?name=${encodeURIComponent(name)}`);
-  const data = await resp.json();
-  if (!resp.ok || data.error) {
-    document.getElementById("heatmap-status").textContent = data.error || "Failed to load dataset";
-    return;
+
+  // Check cache first, or parse from stored text
+  let data;
+  if (state.parsedDatasets[name]) {
+    data = state.parsedDatasets[name];
+  } else {
+    const text = state.datasetTextsByName[name];
+    if (!text) {
+      document.getElementById("heatmap-status").textContent = `Dataset text not found: ${name}`;
+      return;
+    }
+    const sourceTree = state.fullTreeData || state.treeData;
+    const treeTips = new Set(collectAllTipNames(sourceTree));
+    const result = parseDatasetText(text, name, treeTips);
+    if (result.error) {
+      document.getElementById("heatmap-status").textContent = result.error;
+      return;
+    }
+    data = result.data;
+    state.parsedDatasets[name] = data;
   }
+
   const visibleColumns = preserveColumns && presetColumns.length > 0
     ? data.columns.filter(column => presetColumns.includes(column))
     : getDefaultHeatmapColumns(data.columns);
@@ -254,6 +272,10 @@ function clearHeatmapDatasets() {
   invalidateRenderCache();
   renderTree();
 }
+
+// ---------------------------------------------------------------------------
+// Label / species helpers (unchanged)
+// ---------------------------------------------------------------------------
 
 function updateLabelInput() {
   const container = document.getElementById("label-input-container");
@@ -435,10 +457,12 @@ function applyFastaState() {
   subtreeHint.innerHTML = "Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation<br>Ctrl+Shift+click: re-root at node";
 }
 
-async function loadTipDatalist() {
-  const resp = await fetch("/api/tip-names");
-  const data = await resp.json();
-  state.allTipNames = data.tips || [];
+// ---------------------------------------------------------------------------
+// Tip datalist (local, replacing fetch)
+// ---------------------------------------------------------------------------
+
+function loadTipDatalist() {
+  state.allTipNames = state.proteinSeqsUngapped ? Object.keys(state.proteinSeqsUngapped).sort() : [];
   const dl = document.getElementById("tip-datalist");
   dl.innerHTML = "";
   state.allTipNames.forEach(tip => {
@@ -448,31 +472,38 @@ async function loadTipDatalist() {
   });
 }
 
-function showLoadedInfo(status, totalTips) {
+// ---------------------------------------------------------------------------
+// Info display
+// ---------------------------------------------------------------------------
+
+function showLoadedInfo(totalTips) {
   const section = document.getElementById("loaded-info-section");
   const el = document.getElementById("loaded-info");
-  if (!status || !status.loaded) {
+  if (!state.loaded) {
     section.style.display = "none";
     return;
   }
   section.style.display = "";
   const lines = [];
   const tipStr = totalTips != null ? ` <span class="loaded-label">(${totalTips} tips)</span>` : "";
-  lines.push(`<span class="loaded-label">Tree:</span> <span class="loaded-value">${status.nwk_name || "unknown"}</span>${tipStr}`);
-  if (status.has_fasta && status.aa_name) {
-    lines.push(`<span class="loaded-label">Alignment:</span> <span class="loaded-value">${status.aa_name}</span> <span class="loaded-label">(${status.num_seqs} seqs)</span>`);
+  lines.push(`<span class="loaded-label">Tree:</span> <span class="loaded-value">${state.nwkName || "unknown"}</span>${tipStr}`);
+  if (state.hasFasta && state.aaName) {
+    lines.push(`<span class="loaded-label">Alignment:</span> <span class="loaded-value">${state.aaName}</span> <span class="loaded-label">(${state.numSeqs} seqs)</span>`);
   } else {
     lines.push(`<span class="loaded-label">Alignment:</span> <span class="loaded-none">none</span>`);
   }
-  if (status.num_species > 0) {
-    lines.push(`<span class="loaded-label">Species:</span> <span class="loaded-value">${status.num_species} species</span>`);
+  if (state.numSpecies > 0) {
+    lines.push(`<span class="loaded-label">Species:</span> <span class="loaded-value">${state.numSpecies} species</span>`);
   } else {
     lines.push(`<span class="loaded-label">Species:</span> <span class="loaded-none">none</span>`);
   }
-  lines.push(`<span class="loaded-label">Datasets:</span> <span class="loaded-value">${status.num_datasets || 0}</span>`);
-  lines.push(`<span class="loaded-label">Folder:</span> <span class="loaded-value">${status.input_dir}</span>`);
+  lines.push(`<span class="loaded-label">Datasets:</span> <span class="loaded-value">${state.datasetFiles.length}</span>`);
   el.innerHTML = lines.join("<br>");
 }
+
+// ---------------------------------------------------------------------------
+// Undo / redo (unchanged)
+// ---------------------------------------------------------------------------
 
 function captureState() {
   return {
@@ -537,6 +568,10 @@ function redo() {
   restoreState(state.redoStack.pop());
 }
 
+// ---------------------------------------------------------------------------
+// Subtree focus (unchanged)
+// ---------------------------------------------------------------------------
+
 function openSubtree(nodeId) {
   pushUndo();
   if (state.fullTreeData === null) state.fullTreeData = state.treeData;
@@ -553,40 +588,41 @@ function openSubtree(nodeId) {
   renderTree();
 }
 
-async function rerootAt(nodeId) {
+// ---------------------------------------------------------------------------
+// Reroot (local, replacing fetch)
+// ---------------------------------------------------------------------------
+
+function rerootAt(nodeId) {
   pushUndo();
-  try {
-    const resp = await fetch("/api/reroot", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ node_id: nodeId }),
-    });
-    const data = await resp.json();
-    if (data.error) {
-      setTooltip(`Re-root failed: ${data.error}`);
-      return;
-    }
-    state.treeData = data.tree;
-    state.nodeById = {};
-    state.parentMap = {};
-    indexNodes(state.treeData);
-    state.collapsedNodes.clear();
-    state.selectedTip = null;
-    state.exportNodeId = null;
-    state.fullTreeData = null;
-    invalidateRenderCache();
-    state.scale = 1;
-    state.tx = 20;
-    state.ty = 20;
-    document.getElementById("subtree-bar").style.display = "none";
-    document.getElementById("sidebar-back-full-tree").style.display = "none";
-    document.getElementById("export-form").style.display = "none";
-    document.getElementById("newick-form").style.display = "none";
-    renderTree();
-    setTooltip("Tree re-rooted");
-  } catch {
-    setTooltip("Re-root failed");
+  const newRoot = rerootTree(state.treeData, nodeId);
+  if (!newRoot) {
+    setTooltip("Re-root failed: node not found");
+    return;
   }
+
+  // Re-annotate species if mapping exists
+  if (Object.keys(state.tipToSpecies).length > 0) {
+    annotateSpecies(newRoot, state.tipToSpecies);
+  }
+
+  state.treeData = newRoot;
+  state.nodeById = {};
+  state.parentMap = {};
+  indexNodes(state.treeData);
+  state.collapsedNodes.clear();
+  state.selectedTip = null;
+  state.exportNodeId = null;
+  state.fullTreeData = null;
+  invalidateRenderCache();
+  state.scale = 1;
+  state.tx = 20;
+  state.ty = 20;
+  document.getElementById("subtree-bar").style.display = "none";
+  document.getElementById("sidebar-back-full-tree").style.display = "none";
+  document.getElementById("export-form").style.display = "none";
+  document.getElementById("newick-form").style.display = "none";
+  renderTree();
+  setTooltip("Tree re-rooted");
 }
 
 function restoreFullTree() {
@@ -604,6 +640,10 @@ function restoreFullTree() {
   renderTree();
 }
 
+// ---------------------------------------------------------------------------
+// Copy / FASTA (local, replacing fetch)
+// ---------------------------------------------------------------------------
+
 async function copyTipName(tipName) {
   try {
     await navigator.clipboard.writeText(tipName);
@@ -614,14 +654,17 @@ async function copyTipName(tipName) {
 }
 
 async function copyTipFasta(tipName) {
+  if (!state.proteinSeqsUngapped) {
+    setTooltip("No alignment loaded");
+    return;
+  }
+  const seq = state.proteinSeqsUngapped[tipName];
+  if (!seq) {
+    setTooltip(`Sequence not found in alignment: ${tipName}`);
+    return;
+  }
   try {
-    const resp = await fetch(`/api/tip-seq?name=${encodeURIComponent(tipName)}`);
-    const data = await resp.json();
-    if (data.error) {
-      setTooltip(`Sequence not found in alignment: ${tipName}`);
-      return;
-    }
-    await navigator.clipboard.writeText(`>${data.name}\n${data.seq}`);
+    await navigator.clipboard.writeText(`>${tipName}\n${seq}`);
     setTooltip("FASTA copied to clipboard!");
   } catch {
     setTooltip("Copy failed");
@@ -629,14 +672,20 @@ async function copyTipFasta(tipName) {
 }
 
 async function copyNodeFasta(nodeId) {
+  if (!state.proteinSeqs) {
+    setTooltip("No alignment loaded");
+    return;
+  }
+  const node = state.nodeById[nodeId];
+  if (!node) return;
+  const tips = collectAllTipNames(node);
+  const fasta = buildExportFasta(tips, state.proteinSeqs, null, null);
   try {
-    const resp = await fetch(`/api/export?node_id=${nodeId}`);
-    const fasta = await resp.text();
     await navigator.clipboard.writeText(fasta);
     let warn = "";
     if (state.hasFasta && state.allTipNames.length > 0) {
       const alnSet = new Set(state.allTipNames);
-      const missing = collectAllTipNames(state.nodeById[nodeId]).filter(tip => !alnSet.has(tip));
+      const missing = tips.filter(tip => !alnSet.has(tip));
       if (missing.length > 0) warn = ` (${missing.length} tip${missing.length !== 1 ? "s" : ""} missing from alignment)`;
     }
     setTooltip(`Aligned FASTA copied (node #${nodeId})${warn}`);
@@ -644,6 +693,10 @@ async function copyNodeFasta(nodeId) {
     setTooltip("Copy failed");
   }
 }
+
+// ---------------------------------------------------------------------------
+// Tooltips (unchanged)
+// ---------------------------------------------------------------------------
 
 function buildTipTooltip(tipName, species) {
   const lines = [tipName, `Species: ${species || "unknown"}`];
@@ -656,7 +709,7 @@ function buildTipTooltip(tipName, species) {
       if (len != null) lines.push(`Length: ${len} aa`);
       const matching = state.motifList.filter(motif => motif.tipNames.includes(tipName));
       if (matching.length > 0) lines.push(`Motifs: ${matching.map(motif => motif.pattern).join(", ")}`);
-      lines.push("Click to copy name · Shift+click to copy FASTA");
+      lines.push("Click to copy name \u00b7 Shift+click to copy FASTA");
     }
   }
   return lines.join("\n");
@@ -676,13 +729,16 @@ function buildHeatmapTooltip(el) {
   return lines.join("\n");
 }
 
-async function openExportPanel(nodeId) {
+// ---------------------------------------------------------------------------
+// Export panel (local, replacing fetch)
+// ---------------------------------------------------------------------------
+
+function openExportPanel(nodeId) {
   state.exportNodeId = nodeId;
   document.getElementById("export-form").style.display = "";
 
-  const resp = await fetch(`/api/node-tips?node_id=${nodeId}`);
-  const data = await resp.json();
-  const tips = data.tips || [];
+  const node = state.nodeById[nodeId];
+  const tips = node ? collectAllTipNames(node) : [];
   state.selectedNodeTips = tips;
 
   updateSpeciesCounts();
@@ -698,10 +754,10 @@ async function openExportPanel(nodeId) {
   const infoEl = document.getElementById("export-info");
   if (missingTips.length > 0) {
     infoEl.innerHTML =
-      `Node #${nodeId} — ${tips.length} tip${tips.length !== 1 ? "s" : ""}` +
+      `Node #${nodeId} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}` +
       `<br><span style="color:#c0392b">${missingTips.length} tip${missingTips.length !== 1 ? "s" : ""} not in alignment: ${missingTips.slice(0, 5).join(", ")}${missingTips.length > 5 ? ", ..." : ""}</span>`;
   } else {
-    infoEl.textContent = `Node #${nodeId} — ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
+    infoEl.textContent = `Node #${nodeId} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
   }
   document.getElementById("export-tips-summary").textContent = `Tip names (${tips.length})`;
   document.getElementById("export-tips-list").textContent = tips.join("\n");
@@ -714,11 +770,15 @@ async function openExportPanel(nodeId) {
   document.getElementById("export-ref-end").value = "";
   document.getElementById("export-result").textContent = "";
   document.getElementById("newick-form").style.display = "";
-  document.getElementById("newick-info").textContent = `Node #${nodeId} — ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
+  document.getElementById("newick-info").textContent = `Node #${nodeId} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
   document.getElementById("newick-result").textContent = "";
   updateLabelInput();
   document.getElementById("export-section").scrollIntoView({ behavior: "smooth" });
 }
+
+// ---------------------------------------------------------------------------
+// Search (unchanged or local)
+// ---------------------------------------------------------------------------
 
 function searchName() {
   const query = document.getElementById("name-input").value.trim();
@@ -772,26 +832,59 @@ function selectNameTip(tipName) {
   }
 }
 
-async function searchMotif() {
+// ---------------------------------------------------------------------------
+// Motif search (local, replacing fetch)
+// ---------------------------------------------------------------------------
+
+function searchMotif() {
   const pattern = document.getElementById("motif-input").value.trim();
   if (!pattern) return;
   const type = document.getElementById("motif-type").value;
-  const resp = await fetch(`/api/motif?pattern=${encodeURIComponent(pattern)}&type=${type}`);
-  const data = await resp.json();
   const result = document.getElementById("motif-result");
-  if (data.error) {
-    result.textContent = data.error;
+
+  if (!state.proteinSeqsUngapped) {
+    result.textContent = "No alignment loaded";
     return;
   }
+
+  let regexStr;
+  if (type === "prosite") {
+    try {
+      regexStr = prositeToRegex(pattern);
+    } catch (e) {
+      result.textContent = `Invalid PROSITE pattern: ${e.message}`;
+      return;
+    }
+  } else {
+    regexStr = pattern;
+  }
+
+  let compiled;
+  try {
+    compiled = new RegExp(regexStr, "i");
+  } catch (e) {
+    result.textContent = `Invalid regex: ${e.message}`;
+    return;
+  }
+
+  const matched = Object.entries(state.proteinSeqsUngapped)
+    .filter(([, seq]) => compiled.test(seq))
+    .map(([tip]) => tip)
+    .sort();
+
   const color = MOTIF_PALETTE[state.motifList.length % MOTIF_PALETTE.length];
-  state.motifList.push({ pattern, type, tipNames: data.matched_tips || [], color });
+  state.motifList.push({ pattern, type, tipNames: matched, color });
   rebuildMotifMatches();
   buildMotifList();
-  result.textContent = `${data.matched_tips.length} tips matched`;
+  result.textContent = `${matched.length} tips matched`;
   renderTree();
 }
 
-async function highlightSharedNodes() {
+// ---------------------------------------------------------------------------
+// Shared nodes (local, replacing fetch)
+// ---------------------------------------------------------------------------
+
+function highlightSharedNodes() {
   const checked = [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species);
   const listEl = document.getElementById("shared-nodes-list");
   if (checked.length === 0) {
@@ -800,21 +893,18 @@ async function highlightSharedNodes() {
     return;
   }
   const excluded = [...document.querySelectorAll("#exclude-species-list input:checked")].map(cb => cb.dataset.excludeSpecies);
-  const params = checked.map(species => `species=${encodeURIComponent(species)}`).join("&") +
-    (excluded.length ? `&${excluded.map(species => `exclude=${encodeURIComponent(species)}`).join("&")}` : "");
-  const resp = await fetch(`/api/nodes-by-species?${params}`);
-  const data = await resp.json();
-  state.sharedNodes = new Set(data.highlighted_nodes || []);
+  const nodeIds = findNodesWithSpecies(state.treeData, checked, excluded);
+  state.sharedNodes = new Set(nodeIds);
   document.getElementById("shared-result").textContent = `${state.sharedNodes.size} nodes highlighted`;
   listEl.innerHTML = "";
   [...state.sharedNodes].sort((a, b) => a - b).forEach(nodeId => {
     const node = state.nodeById[nodeId];
     const tips = node ? countAllTips(node) : "?";
-    const sup = node && node.sup != null ? node.sup : "—";
+    const sup = node && node.sup != null ? node.sup : "\u2014";
     const item = document.createElement("div");
     item.className = "name-match-item";
     item.dataset.nodeid = nodeId;
-    item.textContent = `Node #${nodeId} — ${tips} tips (support: ${sup})`;
+    item.textContent = `Node #${nodeId} \u2014 ${tips} tips (support: ${sup})`;
     item.addEventListener("click", () => selectSharedNode(nodeId));
     listEl.appendChild(item);
   });
@@ -840,6 +930,10 @@ function selectSharedNode(nodeId) {
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// Filter tips (unchanged)
+// ---------------------------------------------------------------------------
 
 function filterTipsByRegex() {
   const pattern = document.getElementById("filter-tips-input").value.trim();
@@ -903,7 +997,11 @@ function setNodeLabel() {
   buildLabelList();
 }
 
-async function comparePairwise() {
+// ---------------------------------------------------------------------------
+// Pairwise compare (local, replacing fetch)
+// ---------------------------------------------------------------------------
+
+function comparePairwise() {
   const tipA = document.getElementById("pairwise-tip-a").value.trim();
   const tipB = document.getElementById("pairwise-tip-b").value.trim();
   const resultEl = document.getElementById("pairwise-result");
@@ -920,26 +1018,40 @@ async function comparePairwise() {
     lines.push("Could not compute patristic distance (tips not found)");
   }
 
-  if (state.hasFasta) {
-    try {
-      const resp = await fetch(`/api/pairwise?tip1=${encodeURIComponent(tipA)}&tip2=${encodeURIComponent(tipB)}`);
-      const data = await resp.json();
-      if (data.error) {
-        lines.push(data.error);
+  if (state.hasFasta && state.proteinSeqs) {
+    const seq1 = state.proteinSeqs[tipA];
+    const seq2 = state.proteinSeqs[tipB];
+    if (!seq1) {
+      lines.push(`Tip '${tipA}' not found in alignment`);
+    } else if (!seq2) {
+      lines.push(`Tip '${tipB}' not found in alignment`);
+    } else {
+      const result = computePairwiseIdentity(seq1, seq2);
+      if (result.error) {
+        lines.push(result.error);
       } else {
-        lines.push(`Sequence identity: ${(data.identity * 100).toFixed(1)}% (${data.identical_positions}/${data.aligned_length} positions)`);
+        lines.push(`Sequence identity: ${(result.identity * 100).toFixed(1)}% (${result.identical_positions}/${result.aligned_length} positions)`);
       }
-    } catch {
-      lines.push("Server error computing identity");
     }
   }
   resultEl.textContent = lines.join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// Session save/load (v2 self-contained format)
+// ---------------------------------------------------------------------------
+
 function saveSession() {
+  if (!state.loaded) return;
+
   const session = {
-    version: 1,
-    inputDir: state.inputDir,
+    version: 2,
+    sourceTexts: state.sourceTexts,
+    gene: state.gene,
+    nwkName: state.nwkName,
+    aaName: state.aaName,
+    treeData: state.treeData,
+    fullTreeData: state.fullTreeData,
     collapsedNodes: [...state.collapsedNodes],
     nodeLabels: state.nodeLabels,
     exportNodeId: state.exportNodeId,
@@ -958,6 +1070,7 @@ function saveSession() {
     triangleScale: state.triangleScale,
     tipSpacing: state.tipSpacing,
     tipLabelSize: state.tipLabelSize,
+    dotSize: state.dotSize,
     hiddenTips: [...state.hiddenTips],
     scale: state.scale,
     tx: state.tx,
@@ -971,7 +1084,7 @@ function saveSession() {
   triggerDownload(new Blob([JSON.stringify(session, null, 2)], { type: "application/json" }), "phyloscope-session.json");
 }
 
-async function loadSession(fromSetup = false) {
+function loadSession(fromSetup = false) {
   const input = document.createElement("input");
   input.type = "file";
   input.accept = ".json";
@@ -980,118 +1093,241 @@ async function loadSession(fromSetup = false) {
     if (!file) return;
     try {
       const session = JSON.parse(await file.text());
-      if (session.version !== 1) {
+
+      if (session.version === 2) {
+        await loadSessionV2(session, fromSetup);
+      } else if (session.version === 1) {
+        loadSessionV1(session, fromSetup);
+      } else {
         alert("Unknown session version");
-        return;
       }
-
-      if (fromSetup) {
-        const inputDir = session.inputDir || dom.setupPathInput.value.trim();
-        if (!inputDir) {
-          dom.setupError.textContent = "Session has no saved path. Enter a folder path above, then try again.";
-          return;
-        }
-        dom.setupError.textContent = "";
-        const resp = await fetch("/api/load", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input_dir: inputDir }),
-        });
-        const data = await resp.json();
-        if (!resp.ok) {
-          dom.setupError.textContent = data.error || "Failed to load data from session path.";
-          return;
-        }
-        hideSetup();
-        await init();
-      }
-
-      state.collapsedNodes = new Set(session.collapsedNodes || []);
-      state.nodeLabels = session.nodeLabels || {};
-      state.exportNodeId = session.exportNodeId ?? null;
-      state.selectedTip = session.selectedTip ?? null;
-      state.hiddenTips = new Set(session.hiddenTips || []);
-      state.layoutMode = session.layoutMode || "rectangular";
-      state.usePhylogram = session.usePhylogram ?? true;
-      state.showTipLabels = session.showTipLabels ?? true;
-      state.showBootstraps = session.showBootstraps ?? false;
-      state.showLengths = session.showLengths ?? false;
-      state.fastMode = session.fastMode ?? false;
-      state.uniformTriangles = session.uniformTriangles ?? false;
-      state.triangleScale = session.triangleScale ?? 100;
-      state.tipSpacing = session.tipSpacing ?? 16;
-      state.tipLabelSize = session.tipLabelSize ?? 10;
-      state.scale = session.scale ?? 1;
-      state.tx = session.tx ?? 20;
-      state.ty = session.ty ?? 20;
-      document.querySelector(`input[name="layout"][value="${state.layoutMode}"]`).checked = true;
-      document.getElementById("phylogram-toggle").checked = state.usePhylogram;
-      document.getElementById("tip-labels-toggle").checked = state.showTipLabels;
-      document.getElementById("bootstrap-toggle").checked = state.showBootstraps;
-      document.getElementById("length-toggle").checked = state.showLengths;
-      document.getElementById("fast-mode-toggle").checked = state.fastMode;
-      document.getElementById("uniform-triangles-toggle").checked = state.uniformTriangles;
-      document.getElementById("triangle-size").value = state.triangleScale;
-      document.getElementById("tip-spacing").value = state.tipSpacing;
-      document.getElementById("tip-label-size").value = state.tipLabelSize;
-
-      if (session.checkedSpecies) {
-        const checkSet = new Set(session.checkedSpecies);
-        document.querySelectorAll("#species-list input").forEach(cb => {
-          cb.checked = checkSet.has(cb.dataset.species);
-        });
-      }
-      if (session.excludedSpecies) {
-        const excludeSet = new Set(session.excludedSpecies);
-        document.querySelectorAll("#exclude-species-list input").forEach(cb => {
-          cb.checked = excludeSet.has(cb.dataset.excludeSpecies);
-        });
-      }
-
-      if (session.nameSearch) {
-        document.getElementById("name-input").value = session.nameSearch;
-        searchName();
-      }
-
-      state.motifList = [];
-      if (session.motifList) {
-        for (const motif of session.motifList) {
-          const resp = await fetch(`/api/motif?pattern=${encodeURIComponent(motif.pattern)}&type=${motif.type}`);
-          const data = await resp.json();
-          if (!data.error) {
-            const color = MOTIF_PALETTE[state.motifList.length % MOTIF_PALETTE.length];
-            state.motifList.push({ pattern: motif.pattern, type: motif.type, tipNames: data.matched_tips || [], color });
-          }
-        }
-        rebuildMotifMatches();
-        buildMotifList();
-      }
-
-      clearHeatmapDatasets();
-      if (session.activeHeatmaps) {
-        for (const heatmap of session.activeHeatmaps) {
-          await loadHeatmapDataset(heatmap.name, true, heatmap.visibleColumns || []);
-        }
-      }
-
-      updateFilterBadge();
-      buildLabelList();
-      updateLabelInput();
-      invalidateRenderCache();
-      renderTree();
-      document.getElementById("session-result").textContent = "Session loaded.";
     } catch (e) {
-      document.getElementById("session-result").textContent = `Load failed: ${e.message}`;
+      const target = fromSetup ? dom.setupError : document.getElementById("session-result");
+      target.textContent = `Load failed: ${e.message}`;
     }
   });
   input.click();
 }
 
+async function loadSessionV2(session, fromSetup) {
+  // Reconstruct workspace from source texts
+  const workspace = loadFromSourceTexts(session.sourceTexts);
+
+  // Populate state with workspace data
+  state.loaded = true;
+  state.gene = session.gene || workspace.gene;
+  state.nwkName = session.nwkName || workspace.nwkName;
+  state.aaName = session.aaName || workspace.aaName;
+  state.hasFasta = workspace.hasFasta;
+  state.numSeqs = workspace.numSeqs;
+  state.numSpecies = workspace.numSpecies;
+  state.proteinSeqs = workspace.proteinSeqs;
+  state.proteinSeqsUngapped = workspace.proteinSeqsUngapped;
+  state.speciesMap = workspace.speciesToTips;
+  state.tipToSpecies = workspace.tipToSpecies;
+  state.tipLengths = workspace.tipLengths;
+  state.sourceTexts = session.sourceTexts;
+  state.datasetFiles = workspace.datasetFileNames;
+  state.datasetTextsByName = {};
+  for (const d of (session.sourceTexts.datasets || [])) {
+    state.datasetTextsByName[d.name] = d.text;
+  }
+  state.parsedDatasets = {};
+
+  // Use saved tree data (may be rerooted/subtree-focused)
+  state.treeData = session.treeData;
+  state.fullTreeData = session.fullTreeData || null;
+
+  // Re-annotate species on saved tree
+  if (Object.keys(state.tipToSpecies).length > 0) {
+    annotateSpecies(state.treeData, state.tipToSpecies);
+    if (state.fullTreeData) annotateSpecies(state.fullTreeData, state.tipToSpecies);
+  }
+
+  if (fromSetup) hideSetup();
+
+  // Initialize species colors
+  const speciesList = Object.keys(state.speciesMap).sort();
+  speciesList.forEach((species, index) => {
+    state.speciesColors[species] = PALETTE[index % PALETTE.length];
+  });
+
+  state.nodeById = {};
+  state.parentMap = {};
+  indexNodes(state.treeData);
+
+  const totalTips = countAllTips(state.treeData);
+  showLoadedInfo(totalTips);
+
+  buildSpeciesList(speciesList);
+  buildExcludeSpeciesList(speciesList);
+  setupControls();
+  refreshDatasetList();
+  loadTipDatalist();
+  applyFastaState();
+
+  // Restore UI state
+  applySessionSettings(session);
+
+  // Restore motifs locally
+  state.motifList = [];
+  if (session.motifList && state.proteinSeqsUngapped) {
+    for (const motif of session.motifList) {
+      let regexStr;
+      if (motif.type === "prosite") {
+        try { regexStr = prositeToRegex(motif.pattern); } catch { continue; }
+      } else {
+        regexStr = motif.pattern;
+      }
+      try {
+        const compiled = new RegExp(regexStr, "i");
+        const matched = Object.entries(state.proteinSeqsUngapped)
+          .filter(([, seq]) => compiled.test(seq))
+          .map(([tip]) => tip)
+          .sort();
+        const color = MOTIF_PALETTE[state.motifList.length % MOTIF_PALETTE.length];
+        state.motifList.push({ pattern: motif.pattern, type: motif.type, tipNames: matched, color });
+      } catch { /* skip invalid patterns */ }
+    }
+    rebuildMotifMatches();
+    buildMotifList();
+  }
+
+  // Restore heatmaps
+  clearHeatmapDatasets();
+  if (session.activeHeatmaps) {
+    for (const heatmap of session.activeHeatmaps) {
+      loadHeatmapDataset(heatmap.name, true, heatmap.visibleColumns || []);
+    }
+  }
+
+  if (state.fullTreeData) {
+    document.getElementById("subtree-bar").style.display = "";
+    document.getElementById("sidebar-back-full-tree").style.display = "";
+  }
+
+  updateFilterBadge();
+  buildLabelList();
+  updateLabelInput();
+  invalidateRenderCache();
+  renderTree();
+  document.getElementById("session-result").textContent = "Session loaded.";
+}
+
+function loadSessionV1(session, fromSetup) {
+  if (fromSetup) {
+    dom.setupError.textContent = "This is a v1 session. Please load your data files first using the folder/file picker, then load this session from the Session panel in the sidebar.";
+    return;
+  }
+  if (!state.loaded) {
+    document.getElementById("session-result").textContent = "Load data first, then load the v1 session to apply its settings.";
+    return;
+  }
+
+  // Apply UI settings from v1 session to current data
+  applySessionSettings(session);
+
+  // Restore motifs locally
+  state.motifList = [];
+  if (session.motifList && state.proteinSeqsUngapped) {
+    for (const motif of session.motifList) {
+      let regexStr;
+      if (motif.type === "prosite") {
+        try { regexStr = prositeToRegex(motif.pattern); } catch { continue; }
+      } else {
+        regexStr = motif.pattern;
+      }
+      try {
+        const compiled = new RegExp(regexStr, "i");
+        const matched = Object.entries(state.proteinSeqsUngapped)
+          .filter(([, seq]) => compiled.test(seq))
+          .map(([tip]) => tip)
+          .sort();
+        const color = MOTIF_PALETTE[state.motifList.length % MOTIF_PALETTE.length];
+        state.motifList.push({ pattern: motif.pattern, type: motif.type, tipNames: matched, color });
+      } catch { /* skip */ }
+    }
+    rebuildMotifMatches();
+    buildMotifList();
+  }
+
+  clearHeatmapDatasets();
+  if (session.activeHeatmaps) {
+    for (const heatmap of session.activeHeatmaps) {
+      loadHeatmapDataset(heatmap.name, true, heatmap.visibleColumns || []);
+    }
+  }
+
+  updateFilterBadge();
+  buildLabelList();
+  updateLabelInput();
+  invalidateRenderCache();
+  renderTree();
+  document.getElementById("session-result").textContent = "V1 session settings applied.";
+}
+
+function applySessionSettings(session) {
+  state.collapsedNodes = new Set(session.collapsedNodes || []);
+  state.nodeLabels = session.nodeLabels || {};
+  state.exportNodeId = session.exportNodeId ?? null;
+  state.selectedTip = session.selectedTip ?? null;
+  state.hiddenTips = new Set(session.hiddenTips || []);
+  state.layoutMode = session.layoutMode || "rectangular";
+  state.usePhylogram = session.usePhylogram ?? true;
+  state.showTipLabels = session.showTipLabels ?? true;
+  state.showBootstraps = session.showBootstraps ?? false;
+  state.showLengths = session.showLengths ?? false;
+  state.fastMode = session.fastMode ?? false;
+  state.uniformTriangles = session.uniformTriangles ?? false;
+  state.triangleScale = session.triangleScale ?? 100;
+  state.tipSpacing = session.tipSpacing ?? 16;
+  state.tipLabelSize = session.tipLabelSize ?? 10;
+  state.dotSize = session.dotSize ?? 3;
+  state.scale = session.scale ?? 1;
+  state.tx = session.tx ?? 20;
+  state.ty = session.ty ?? 20;
+  document.querySelector(`input[name="layout"][value="${state.layoutMode}"]`).checked = true;
+  document.getElementById("phylogram-toggle").checked = state.usePhylogram;
+  document.getElementById("tip-labels-toggle").checked = state.showTipLabels;
+  document.getElementById("bootstrap-toggle").checked = state.showBootstraps;
+  document.getElementById("length-toggle").checked = state.showLengths;
+  document.getElementById("fast-mode-toggle").checked = state.fastMode;
+  document.getElementById("uniform-triangles-toggle").checked = state.uniformTriangles;
+  document.getElementById("triangle-size").value = state.triangleScale;
+  document.getElementById("tip-spacing").value = state.tipSpacing;
+  document.getElementById("tip-label-size").value = state.tipLabelSize;
+  document.getElementById("dot-size").value = state.dotSize;
+
+  if (session.checkedSpecies) {
+    const checkSet = new Set(session.checkedSpecies);
+    document.querySelectorAll("#species-list input").forEach(cb => {
+      cb.checked = checkSet.has(cb.dataset.species);
+    });
+  }
+  if (session.excludedSpecies) {
+    const excludeSet = new Set(session.excludedSpecies);
+    document.querySelectorAll("#exclude-species-list input").forEach(cb => {
+      cb.checked = excludeSet.has(cb.dataset.excludeSpecies);
+    });
+  }
+
+  if (session.nameSearch) {
+    document.getElementById("name-input").value = session.nameSearch;
+    searchName();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Export alignment (local, replacing fetch)
+// ---------------------------------------------------------------------------
+
 function doExport() {
-  if (state.exportNodeId == null) return;
-  const params = new URLSearchParams();
-  params.set("node_id", state.exportNodeId);
+  if (state.exportNodeId == null || !state.proteinSeqs) return;
   const resultEl = document.getElementById("export-result");
+
+  const node = state.nodeById[state.exportNodeId];
+  if (!node) return;
+  let tips = collectAllTipNames(node);
 
   const extra = document.getElementById("export-extra-tips").value.trim();
   const extraList = extra ? extra.split(",").map(value => value.trim()).filter(Boolean) : [];
@@ -1103,42 +1339,58 @@ function doExport() {
       resultEl.textContent = `Sequences not found: ${missing.join(", ")}`;
       return;
     }
-    extraList.forEach(tip => params.append("extra_tips", tip));
+    const existingSet = new Set(tips);
+    for (const t of extraList) {
+      if (!existingSet.has(t)) tips.push(t);
+    }
   }
 
+  let sliceStart = null;
+  let sliceEnd = null;
   const mode = document.querySelector('input[name="export-range"]:checked').value;
   if (mode === "columns") {
-    const start = document.getElementById("export-col-start").value;
-    const end = document.getElementById("export-col-end").value;
-    if (start) params.set("col_start", start);
-    if (end) params.set("col_end", end);
+    const start = parseInt(document.getElementById("export-col-start").value);
+    const end = parseInt(document.getElementById("export-col-end").value);
+    if (start) sliceStart = start - 1;
+    if (end) sliceEnd = end;
   } else if (mode === "refseq") {
     const ref = document.getElementById("export-ref-seq").value.trim();
-    const start = document.getElementById("export-ref-start").value;
-    const end = document.getElementById("export-ref-end").value;
-    if (ref) params.set("ref_seq", ref);
-    if (start) params.set("ref_start", start);
-    if (end) params.set("ref_end", end);
+    const start = parseInt(document.getElementById("export-ref-start").value);
+    const end = parseInt(document.getElementById("export-ref-end").value);
+    if (ref && start && end && state.proteinSeqs[ref]) {
+      const [cs, ce] = refPosToColumns(state.proteinSeqs[ref], start, end);
+      if (cs == null || ce == null) {
+        resultEl.style.color = "#c0392b";
+        resultEl.textContent = "Reference positions out of range";
+        return;
+      }
+      sliceStart = cs;
+      sliceEnd = ce;
+    }
   }
 
-  const link = document.createElement("a");
-  link.href = `/api/export?${params.toString()}`;
-  link.download = `export_node${state.exportNodeId}.fasta`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  const fasta = buildExportFasta(tips, state.proteinSeqs, sliceStart, sliceEnd);
+  triggerDownload(
+    new Blob([fasta], { type: "text/plain" }),
+    `export_node${state.exportNodeId}.fasta`
+  );
   resultEl.style.color = "#27ae60";
   resultEl.textContent = "Download started.";
 }
 
+// ---------------------------------------------------------------------------
+// Export Newick (local, replacing fetch)
+// ---------------------------------------------------------------------------
+
 function exportNewick() {
   if (state.exportNodeId == null) return;
-  const link = document.createElement("a");
-  link.href = `/api/export-newick?node_id=${state.exportNodeId}`;
-  link.download = `node${state.exportNodeId}.nwk`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  const node = state.nodeById[state.exportNodeId];
+  if (!node) return;
+  const nwk = nodeToNewick(node) + ";";
+  triggerDownload(
+    new Blob([nwk], { type: "text/plain" }),
+    `node${state.exportNodeId}.nwk`
+  );
   const resultEl = document.getElementById("newick-result");
   resultEl.style.color = "#27ae60";
   resultEl.textContent = "Download started.";
@@ -1147,9 +1399,11 @@ function exportNewick() {
 async function copyNewick() {
   if (state.exportNodeId == null) return;
   const resultEl = document.getElementById("newick-result");
+  const node = state.nodeById[state.exportNodeId];
+  if (!node) return;
+  const nwk = nodeToNewick(node) + ";";
   try {
-    const resp = await fetch(`/api/export-newick?node_id=${state.exportNodeId}`);
-    await navigator.clipboard.writeText(await resp.text());
+    await navigator.clipboard.writeText(nwk);
     resultEl.style.color = "#27ae60";
     resultEl.textContent = "Copied to clipboard!";
   } catch {
@@ -1157,6 +1411,10 @@ async function copyNewick() {
     resultEl.textContent = "Copy failed.";
   }
 }
+
+// ---------------------------------------------------------------------------
+// Image export (unchanged)
+// ---------------------------------------------------------------------------
 
 function exportSVG() {
   const resultEl = document.getElementById("export-viz-result");
@@ -1226,117 +1484,108 @@ async function exportPDF() {
   }
 }
 
-async function browserNavigate(path) {
-  const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : "/api/browse";
-  try {
-    const resp = await fetch(url);
-    const data = await resp.json();
-    if (!resp.ok) {
-      dom.setupError.textContent = data.error || "Browse failed.";
-      return;
-    }
-    state.browserCurrentDir = data.current;
-    state.browserParentDir = data.parent;
-    dom.browserCurrentPath.textContent = data.current;
-    dom.browserUpBtn.disabled = !data.parent;
-    const isValid = data.has_nwk;
-    const hasAlignment = data.has_nwk && data.has_aa_fa;
-    dom.browserValidIndicator.textContent = hasAlignment
-      ? "\u2714 Valid input folder (.nwk + .aa.fa found)"
-      : data.has_nwk
-        ? "\u2714 Tree found (.nwk) — no alignment (.aa.fa)"
-        : "";
-    dom.browserValidIndicator.style.display = isValid ? "" : "none";
-    dom.browserSelectBtn.disabled = !isValid;
+// ---------------------------------------------------------------------------
+// File selection handling
+// ---------------------------------------------------------------------------
 
-    dom.browserDirList.innerHTML = "";
-    if (data.dirs.length === 0) {
-      const empty = document.createElement("div");
-      empty.style.cssText = "padding:8px;font-size:12px;color:#888;text-align:center;";
-      empty.textContent = "No subdirectories";
-      dom.browserDirList.appendChild(empty);
-      return;
-    }
-    data.dirs.forEach(dir => {
-      const entry = document.createElement("div");
-      entry.className = "browser-dir-entry";
-      entry.textContent = dir;
-      entry.addEventListener("click", () => browserNavigate(`${data.current}/${dir}`));
-      dom.browserDirList.appendChild(entry);
+function handleFilesSelected(files) {
+  const detected = detectFiles(files);
+  state.stagedFiles = { detected, allFiles: files };
+
+  // Populate detected files panel
+  dom.detectedFilesPanel.style.display = "";
+  dom.setupLoadRow.style.display = "";
+  dom.setupError.textContent = "";
+
+  // Tree select
+  const nwkSelect = dom.detectedNwkSelect;
+  nwkSelect.innerHTML = "";
+  if (detected.nwkFiles.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "(no .nwk files found)";
+    nwkSelect.appendChild(opt);
+  } else {
+    detected.nwkFiles.forEach(f => {
+      const opt = document.createElement("option");
+      opt.value = f.name;
+      opt.textContent = f.name;
+      nwkSelect.appendChild(opt);
     });
-  } catch (e) {
-    dom.setupError.textContent = `Browse error: ${e.message}`;
   }
+
+  // Alignment select
+  const aaSelect = dom.detectedAaSelect;
+  aaSelect.innerHTML = "";
+  const noneOpt = document.createElement("option");
+  noneOpt.value = "";
+  noneOpt.textContent = "None";
+  aaSelect.appendChild(noneOpt);
+  detected.aaFiles.forEach(f => {
+    const opt = document.createElement("option");
+    opt.value = f.name;
+    opt.textContent = f.name;
+    aaSelect.appendChild(opt);
+  });
+  if (detected.aaFiles.length > 0) {
+    aaSelect.value = detected.aaFiles[0].name;
+  }
+
+  // Orthofinder
+  dom.detectedOrthoSpan.textContent = detected.orthoFiles.length > 0
+    ? `${detected.orthoFiles.length} species files found`
+    : "no species files found";
+  dom.detectedOrthoSpan.style.color = detected.orthoFiles.length > 0 ? "#27ae60" : "#888";
+
+  // Datasets
+  dom.detectedDatasetSpan.textContent = detected.datasetFiles.length > 0
+    ? `${detected.datasetFiles.length} file${detected.datasetFiles.length === 1 ? "" : "s"} found`
+    : "none found";
+  dom.detectedDatasetSpan.style.color = detected.datasetFiles.length > 0 ? "#27ae60" : "#888";
 }
 
-async function scanFolder(dirPath) {
-  if (!dirPath) {
-    dom.detectedFilesPanel.style.display = "none";
-    return;
-  }
-  try {
-    const resp = await fetch(`/api/browse-files?path=${encodeURIComponent(dirPath)}`);
-    if (!resp.ok) {
-      dom.detectedFilesPanel.style.display = "none";
-      return;
-    }
-    const data = await resp.json();
-    dom.detectedFilesPanel.style.display = "";
-    dom.detectedNwkInput.value = data.nwk_files[0] || "";
-    dom.detectedNwkInput.title = data.nwk_files.length > 0 ? `Available: ${data.nwk_files.join(", ")}` : "";
-    dom.detectedAaInput.value = data.aa_files[0] || "";
-    dom.detectedAaInput.title = data.aa_files.length > 0 ? `Available: ${data.aa_files.join(", ")}` : "";
-    dom.detectedAaInput.placeholder = "none found (optional)";
-    dom.detectedOrthoSpan.textContent = data.has_ortho ? "orthofinder-input/ found ✓" : "orthofinder-input/ not found";
-    dom.detectedOrthoSpan.style.color = data.has_ortho ? "#27ae60" : "#888";
-    dom.detectedDatasetSpan.textContent = data.dataset_files.length > 0
-      ? `${data.dataset_files.length} file${data.dataset_files.length === 1 ? "" : "s"} found`
-      : "none found";
-    dom.detectedDatasetSpan.style.color = data.dataset_files.length > 0 ? "#27ae60" : "#888";
-  } catch {
-    dom.detectedFilesPanel.style.display = "none";
-  }
-}
-
-function showSetup() {
-  dom.setupOverlay.style.display = "flex";
-}
-
-function hideSetup() {
-  dom.setupOverlay.style.display = "none";
-}
+// ---------------------------------------------------------------------------
+// Setup load (local, replacing fetch)
+// ---------------------------------------------------------------------------
 
 async function doSetupLoad() {
-  const inputDir = dom.setupPathInput.value.trim();
-  if (!inputDir) {
-    dom.setupError.textContent = "Please enter a folder path.";
+  if (!state.stagedFiles) {
+    dom.setupError.textContent = "Please select a folder or files first.";
     return;
   }
+
+  const detected = state.stagedFiles.detected;
+  const nwkName = dom.detectedNwkSelect.value;
+  const aaName = dom.detectedAaSelect.value;
+
+  if (!nwkName) {
+    dom.setupError.textContent = "No tree file (.nwk) found. Please select a folder containing a .nwk file.";
+    return;
+  }
+
+  const nwkFile = detected.nwkFiles.find(f => f.name === nwkName);
+  const aaFile = aaName ? detected.aaFiles.find(f => f.name === aaName) : null;
+
   dom.setupError.textContent = "";
   dom.setupLoadBtn.disabled = true;
   dom.setupLoadBtn.textContent = "Loading...";
 
-  const payload = { input_dir: inputDir };
-  if (dom.detectedFilesPanel.style.display !== "none") {
-    const nwk = dom.detectedNwkInput.value.trim();
-    const aa = dom.detectedAaInput.value.trim();
-    if (nwk) payload.nwk_file = nwk;
-    payload.aa_file = aa;
-  }
-
   try {
-    const resp = await fetch("/api/load", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+    const loadResult = await loadFromFiles({
+      nwkFile,
+      aaFile: aaFile || null,
+      orthoFiles: detected.orthoFiles,
+      datasetFiles: detected.datasetFiles,
     });
-    const data = await resp.json();
-    if (!resp.ok) {
-      dom.setupError.textContent = data.error || "Failed to load data.";
+
+    if (!loadResult.success) {
+      dom.setupError.textContent = loadResult.error;
       return;
     }
+
+    applyLoadResult(loadResult.result);
     hideSetup();
-    await init();
+    initAfterLoad();
   } catch (e) {
     dom.setupError.textContent = `Error: ${e.message}`;
   } finally {
@@ -1345,53 +1594,124 @@ async function doSetupLoad() {
   }
 }
 
+function applyLoadResult(result) {
+  state.loaded = true;
+  state.gene = result.gene;
+  state.nwkName = result.nwkName;
+  state.aaName = result.aaName;
+  state.hasFasta = result.hasFasta;
+  state.numSeqs = result.numSeqs;
+  state.numSpecies = result.numSpecies;
+  state.treeData = result.treeData;
+  state.proteinSeqs = result.proteinSeqs;
+  state.proteinSeqsUngapped = result.proteinSeqsUngapped;
+  state.speciesMap = result.speciesToTips;
+  state.tipToSpecies = result.tipToSpecies;
+  state.tipLengths = result.tipLengths;
+  state.sourceTexts = result.sourceTexts;
+  state.datasetFiles = result.datasetFileNames;
+  state.datasetTextsByName = {};
+  if (result.sourceTexts && result.sourceTexts.datasets) {
+    for (const d of result.sourceTexts.datasets) {
+      state.datasetTextsByName[d.name] = d.text;
+    }
+  }
+  state.parsedDatasets = {};
+}
+
+function initAfterLoad() {
+  const speciesList = Object.keys(state.speciesMap).sort();
+  speciesList.forEach((species, index) => {
+    state.speciesColors[species] = PALETTE[index % PALETTE.length];
+  });
+
+  state.nodeById = {};
+  state.parentMap = {};
+  indexNodes(state.treeData);
+
+  const totalTips = countAllTips(state.treeData);
+  showLoadedInfo(totalTips);
+
+  if (totalTips > 1000) {
+    state.showTipLabels = false;
+    document.getElementById("tip-labels-toggle").checked = false;
+    state.fastMode = true;
+    document.getElementById("fast-mode-toggle").checked = true;
+  }
+
+  buildSpeciesList(speciesList);
+  buildExcludeSpeciesList(speciesList);
+  setupControls();
+  refreshDatasetList();
+
+  if (totalTips > 2000 && state.fastMode && state.treeData.ch) {
+    const targetLeaves = 50;
+    const collapseThreshold = Math.max(20, Math.floor(totalTips / targetLeaves));
+    const autoCollapse = node => {
+      if (!node.ch || node.ch.length === 0) return;
+      const tips = countAllTips(node);
+      if (tips <= collapseThreshold && tips > 1) {
+        state.collapsedNodes.add(node.id);
+        return;
+      }
+      node.ch.forEach(autoCollapse);
+    };
+    state.treeData.ch.forEach(autoCollapse);
+  }
+
+  renderTree();
+  loadTipDatalist();
+  applyFastaState();
+  buildLabelList();
+  updateFilterBadge();
+}
+
+// ---------------------------------------------------------------------------
+// Setup UI
+// ---------------------------------------------------------------------------
+
+function showSetup() {
+  dom.setupOverlay.style.display = "flex";
+  dom.detectedFilesPanel.style.display = "none";
+  dom.setupLoadRow.style.display = "none";
+  state.stagedFiles = null;
+}
+
+function hideSetup() {
+  dom.setupOverlay.style.display = "none";
+}
+
 function bindStartupControls() {
   if (startupBound) return;
   startupBound = true;
 
-  document.getElementById("reset-btn").addEventListener("click", async () => {
-    await fetch("/api/reset", { method: "POST" });
+  document.getElementById("reset-btn").addEventListener("click", () => {
     resetClientState();
     clearUiForReset();
     showSetup();
   });
 
-  document.getElementById("setup-browse").addEventListener("click", () => {
-    const isHidden = dom.browserPanel.style.display === "none";
-    dom.browserPanel.style.display = isHidden ? "" : "none";
-    if (isHidden) {
-      const currentVal = dom.setupPathInput.value.trim();
-      browserNavigate(currentVal || null);
+  document.getElementById("setup-folder-btn").addEventListener("click", () => {
+    dom.folderPicker.value = "";
+    dom.folderPicker.click();
+  });
+  document.getElementById("setup-files-btn").addEventListener("click", () => {
+    dom.filePicker.value = "";
+    dom.filePicker.click();
+  });
+  dom.folderPicker.addEventListener("change", () => {
+    if (dom.folderPicker.files.length > 0) {
+      handleFilesSelected(dom.folderPicker.files);
     }
   });
-  dom.browserUpBtn.addEventListener("click", () => {
-    if (state.browserParentDir) browserNavigate(state.browserParentDir);
+  dom.filePicker.addEventListener("change", () => {
+    if (dom.filePicker.files.length > 0) {
+      handleFilesSelected(dom.filePicker.files);
+    }
   });
-  dom.browserSelectBtn.addEventListener("click", () => {
-    if (!state.browserCurrentDir) return;
-    dom.setupPathInput.value = state.browserCurrentDir;
-    dom.browserPanel.style.display = "none";
-    scanFolder(state.browserCurrentDir);
-  });
+
   document.getElementById("setup-load-session").addEventListener("click", () => loadSession(true));
-  dom.setupLoadBtn.addEventListener("click", async () => {
-    const path = dom.setupPathInput.value.trim();
-    if (path && dom.detectedFilesPanel.style.display === "none") await scanFolder(path);
-    doSetupLoad();
-  });
-  dom.setupPathInput.addEventListener("keydown", async event => {
-    if (event.key === "Enter") {
-      await scanFolder(dom.setupPathInput.value.trim());
-      doSetupLoad();
-    }
-  });
-  dom.setupPathInput.addEventListener("blur", () => scanFolder(dom.setupPathInput.value.trim()));
-  dom.setupPathInput.addEventListener("input", () => {
-    clearTimeout(dom.setupPathInput._scanTimer);
-    dom.setupPathInput._scanTimer = setTimeout(() => {
-      scanFolder(dom.setupPathInput.value.trim());
-    }, 500);
-  });
+  dom.setupLoadBtn.addEventListener("click", doSetupLoad);
 
   document.getElementById("export-svg-btn").addEventListener("click", exportSVG);
   document.getElementById("export-png-btn").addEventListener("click", exportPNG);
@@ -1400,6 +1720,10 @@ function bindStartupControls() {
   document.getElementById("export-newick-btn").addEventListener("click", exportNewick);
   document.getElementById("copy-newick-btn").addEventListener("click", copyNewick);
 }
+
+// ---------------------------------------------------------------------------
+// Controls binding (unchanged)
+// ---------------------------------------------------------------------------
 
 function setupControls() {
   if (controlsBound) {
@@ -1422,6 +1746,11 @@ function setupControls() {
   });
   document.getElementById("tip-label-size").addEventListener("input", event => {
     state.tipLabelSize = +event.target.value;
+    renderTree();
+  });
+  document.getElementById("dot-size").addEventListener("input", event => {
+    state.dotSize = +event.target.value;
+    invalidateRenderCache();
     renderTree();
   });
   document.getElementById("bootstrap-toggle").addEventListener("change", event => {
@@ -1474,19 +1803,19 @@ function setupControls() {
     if (motifTypeEl.value === "prosite") {
       motifInputEl.placeholder = "e.g. C-x(2,4)-C-x(3)-[LIVMFYWC]";
       motifHintEl.innerHTML =
-        '<b>x</b> — any amino acid<br>' +
-        '<b>[LIVM]</b> — one of L, I, V, or M<br>' +
-        '<b>{PC}</b> — any AA except P or C<br>' +
-        '<b>x(3)</b> — exactly 3 of any AA<br>' +
-        '<b>x(2,4)</b> — 2 to 4 of any AA';
+        '<b>x</b> \u2014 any amino acid<br>' +
+        '<b>[LIVM]</b> \u2014 one of L, I, V, or M<br>' +
+        '<b>{PC}</b> \u2014 any AA except P or C<br>' +
+        '<b>x(3)</b> \u2014 exactly 3 of any AA<br>' +
+        '<b>x(2,4)</b> \u2014 2 to 4 of any AA';
     } else {
       motifInputEl.placeholder = "e.g. L.{2}L[KR] or C\\w{2,4}C";
       motifHintEl.innerHTML =
-        '<b>.</b> — any amino acid<br>' +
-        '<b>[KR]</b> — K or R<br>' +
-        '<b>[^PC]</b> — any AA except P or C<br>' +
-        '<b>.{3}</b> — exactly 3 of any AA<br>' +
-        '<b>.{2,4}</b> — 2 to 4 of any AA';
+        '<b>.</b> \u2014 any amino acid<br>' +
+        '<b>[KR]</b> \u2014 K or R<br>' +
+        '<b>[^PC]</b> \u2014 any AA except P or C<br>' +
+        '<b>.{3}</b> \u2014 exactly 3 of any AA<br>' +
+        '<b>.{2,4}</b> \u2014 2 to 4 of any AA';
     }
   };
   motifTypeEl.addEventListener("change", updateMotifPlaceholder);
@@ -1564,87 +1893,9 @@ function setupControls() {
   updateUndoRedoButtons();
 }
 
-export async function init() {
-  const statusResp = await fetch("/api/status").then(resp => resp.json());
-  state.hasFasta = !!statusResp.has_fasta;
-  state.inputDir = statusResp.input_dir || "";
-
-  const fetches = [
-    fetch("/api/tree").then(resp => resp.json()),
-    fetch("/api/species").then(resp => resp.json()),
-  ];
-  if (state.hasFasta) fetches.push(fetch("/api/tip-lengths").then(resp => resp.json()));
-
-  const [treeData, speciesData, tipLengths = {}] = await Promise.all(fetches);
-  state.treeData = treeData;
-  state.speciesMap = speciesData.species_to_tips;
-  state.tipLengths = tipLengths;
-  state.tipToSpecies = {};
-  Object.entries(state.speciesMap).forEach(([species, tips]) => {
-    tips.forEach(tip => {
-      state.tipToSpecies[tip] = species;
-    });
-  });
-
-  speciesData.species.forEach((species, index) => {
-    state.speciesColors[species] = PALETTE[index % PALETTE.length];
-  });
-
-  state.nodeById = {};
-  state.parentMap = {};
-  indexNodes(state.treeData);
-
-  const totalTips = countAllTips(state.treeData);
-  showLoadedInfo(getStatusSummary(statusResp), totalTips);
-
-  if (totalTips > 1000) {
-    state.showTipLabels = false;
-    document.getElementById("tip-labels-toggle").checked = false;
-    state.fastMode = true;
-    document.getElementById("fast-mode-toggle").checked = true;
-  }
-
-  buildSpeciesList(speciesData.species);
-  buildExcludeSpeciesList(speciesData.species);
-  setupControls();
-  await refreshDatasetList();
-
-  if (totalTips > 2000 && state.fastMode && state.treeData.ch) {
-    const targetLeaves = 50;
-    const collapseThreshold = Math.max(20, Math.floor(totalTips / targetLeaves));
-    const autoCollapse = node => {
-      if (!node.ch || node.ch.length === 0) return;
-      const tips = countAllTips(node);
-      if (tips <= collapseThreshold && tips > 1) {
-        state.collapsedNodes.add(node.id);
-        return;
-      }
-      node.ch.forEach(autoCollapse);
-    };
-    state.treeData.ch.forEach(autoCollapse);
-  }
-
-  renderTree();
-  if (state.hasFasta) await loadTipDatalist();
-  applyFastaState();
-  buildLabelList();
-  updateFilterBadge();
-}
-
-async function checkStatus() {
-  try {
-    const resp = await fetch("/api/status");
-    const data = await resp.json();
-    if (data.loaded) {
-      hideSetup();
-      await init();
-    } else {
-      showSetup();
-    }
-  } catch {
-    showSetup();
-  }
-}
+// ---------------------------------------------------------------------------
+// Tree click/hover handlers (unchanged)
+// ---------------------------------------------------------------------------
 
 function onTreeClick(event) {
   const el = event.target;
@@ -1716,8 +1967,13 @@ function onTreeHover(event) {
   dom.tooltip.style.top = `${event.clientY - 10}px`;
 }
 
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
 export async function initApp() {
   bindStartupControls();
   configureRenderer({ onTreeClick, onTreeHover });
-  await checkStatus();
+  // No server check — always show setup dialog
+  showSetup();
 }
