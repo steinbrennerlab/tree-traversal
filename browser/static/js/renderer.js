@@ -66,6 +66,7 @@ function getRenderCacheKey(checkedSpecies) {
     state.showBootstraps,
     state.fastMode,
     [...state.hiddenTips].sort().join(","),
+    state.labelFontSize,
     JSON.stringify(state.nodeLabels),
     JSON.stringify(state.activeHeatmaps.map(heatmap => ({
       name: heatmap.name,
@@ -410,7 +411,7 @@ function drawNodeDot(fragments, cx, cy, node) {
     fragments.push(`<text x="${cx + d * 2}" y="${cy - d * 1.7}" class="bootstrap-label">${node.sup}</text>`);
   }
   if (state.nodeLabels[node.id]) {
-    fragments.push(`<text x="${cx + d * 2.5}" y="${cy + d * 1.3}" class="node-label">${state.nodeLabels[node.id]}</text>`);
+    fragments.push(`<text x="${cx + d * 2.5}" y="${cy + d * 1.3}" class="node-label" font-size="${state.labelFontSize}">${state.nodeLabels[node.id]}</text>`);
   }
 }
 
@@ -759,7 +760,7 @@ function emitFastTrianglesAndDots(fragments, triangles, dotData) {
       fragments.push(`<text x="${dot.cx + d * 2}" y="${dot.cy - d * 1.7}" class="bootstrap-label">${dot.sup}</text>`);
     }
     if (state.nodeLabels[dot.nodeId]) {
-      fragments.push(`<text x="${dot.cx + d * 2.5}" y="${dot.cy + d * 1.3}" class="node-label">${state.nodeLabels[dot.nodeId]}</text>`);
+      fragments.push(`<text x="${dot.cx + d * 2.5}" y="${dot.cy + d * 1.3}" class="node-label" font-size="${state.labelFontSize}">${state.nodeLabels[dot.nodeId]}</text>`);
     }
   }
 }

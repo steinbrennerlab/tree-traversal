@@ -47,6 +47,7 @@ export const state = {
   collapsedNodes: new Set(),
   hiddenTips: new Set(),
   nodeLabels: {},
+  labelFontSize: 10,
 
   // Layout & render
   layoutMode: "rectangular",
@@ -121,7 +122,7 @@ export function getInlineStyles() {
     ".shared-node": "fill:#ff6600;stroke:#c40;stroke-width:1.5",
     ".collapsed-triangle": "fill:#cde;stroke:#89a",
     ".bootstrap-label": "font-size:8px;fill:#666",
-    ".node-label": "font-size:10px;font-weight:bold;fill:#333;font-family:system-ui,sans-serif",
+    ".node-label": `font-size:${state.labelFontSize}px;font-weight:bold;fill:#333;font-family:system-ui,sans-serif`,
   };
 }
 
@@ -159,6 +160,7 @@ export function resetClientState() {
   state.collapsedNodes = new Set();
   state.hiddenTips = new Set();
   state.nodeLabels = {};
+  state.labelFontSize = 10;
   state.layoutMode = "rectangular";
   state.usePhylogram = true;
   state.showTipLabels = true;

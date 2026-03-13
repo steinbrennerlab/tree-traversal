@@ -375,7 +375,7 @@ input[type=text] { flex: 1; }
 .loaded-info .loaded-none { color: #999; font-style: italic; }
 
 /* Node labels */
-.node-label { font-size: 10px; font-weight: bold; fill: #333; pointer-events: none; }
+.node-label { font-weight: bold; fill: #333; pointer-events: none; }
 
 /* Filter badge */
 .filter-badge {

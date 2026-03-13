@@ -290,6 +290,8 @@ function updateLabelInput() {
 function buildLabelList() {
   const container = document.getElementById("label-list");
   container.innerHTML = "";
+  const hasLabels = Object.keys(state.nodeLabels).length > 0;
+  document.getElementById("label-size-container").style.display = hasLabels ? "flex" : "none";
   for (const [nodeId, label] of Object.entries(state.nodeLabels)) {
     const row = document.createElement("div");
     row.className = "label-entry";
@@ -1055,6 +1057,7 @@ function saveSession() {
     fullTreeData: state.fullTreeData,
     collapsedNodes: [...state.collapsedNodes],
     nodeLabels: state.nodeLabels,
+    labelFontSize: state.labelFontSize,
     exportNodeId: state.exportNodeId,
     selectedTip: state.selectedTip,
     checkedSpecies: [...document.querySelectorAll("#species-list input:checked")].map(cb => cb.dataset.species),
@@ -1270,6 +1273,7 @@ function loadSessionV1(session, fromSetup) {
 function applySessionSettings(session) {
   state.collapsedNodes = new Set(session.collapsedNodes || []);
   state.nodeLabels = session.nodeLabels || {};
+  state.labelFontSize = session.labelFontSize ?? 10;
   state.exportNodeId = session.exportNodeId ?? null;
   state.selectedTip = session.selectedTip ?? null;
   state.hiddenTips = new Set(session.hiddenTips || []);
@@ -1298,6 +1302,7 @@ function applySessionSettings(session) {
   document.getElementById("tip-spacing").value = state.tipSpacing;
   document.getElementById("tip-label-size").value = state.tipLabelSize;
   document.getElementById("dot-size").value = state.dotSize;
+  document.getElementById("label-font-size").value = state.labelFontSize;
 
   if (session.checkedSpecies) {
     const checkSet = new Set(session.checkedSpecies);
@@ -1854,6 +1859,11 @@ function setupControls() {
   document.getElementById("set-label-btn").addEventListener("click", setNodeLabel);
   document.getElementById("node-label-input").addEventListener("keydown", event => {
     if (event.key === "Enter") setNodeLabel();
+  });
+  document.getElementById("label-font-size").addEventListener("input", event => {
+    state.labelFontSize = +event.target.value;
+    invalidateRenderCache();
+    renderTree();
   });
   document.getElementById("pairwise-compare-btn").addEventListener("click", comparePairwise);
   document.getElementById("session-save-btn").addEventListener("click", saveSession);
