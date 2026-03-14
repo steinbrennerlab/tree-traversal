@@ -235,15 +235,45 @@ function buildHeatmapLegendElement(heatmap) {
     delete heatmap.displayMin;
     delete heatmap.displayMid;
     delete heatmap.displayMax;
+    delete heatmap.colorLow;
+    delete heatmap.colorMid;
+    delete heatmap.colorHigh;
     invalidateRenderCache();
     renderTree();
     updateHeatmapPanels();
   });
 
+  // Color pickers
+  const colorRow = document.createElement("div");
+  colorRow.className = "heatmap-color-row";
+  function makeColorPicker(label, value, onChange) {
+    const cell = document.createElement("label");
+    cell.className = "heatmap-color-picker";
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = value;
+    input.addEventListener("input", () => onChange(input.value));
+    const txt = document.createElement("span");
+    txt.textContent = label;
+    cell.append(input, txt);
+    return cell;
+  }
+  function updateGradient() {
+    const lo = heatmap.colorLow || "#2166ac";
+    const mi = heatmap.colorMid || "#f7f7f7";
+    const hi = heatmap.colorHigh || "#b2182b";
+    bar.style.background = `linear-gradient(90deg, ${lo} 0%, ${mi} 50%, ${hi} 100%)`;
+  }
+  colorRow.append(
+    makeColorPicker("Low", colorLow, v => { heatmap.colorLow = v; updateGradient(); invalidateRenderCache(); renderTree(); }),
+    makeColorPicker("Mid", colorMid, v => { heatmap.colorMid = v; updateGradient(); invalidateRenderCache(); renderTree(); }),
+    makeColorPicker("High", colorHigh, v => { heatmap.colorHigh = v; updateGradient(); invalidateRenderCache(); renderTree(); })
+  );
+
   const missing = document.createElement("div");
   missing.className = "heatmap-legend-missing";
   missing.textContent = "Missing values shown in gray";
-  wrapper.append(bar, labels, minSlider, midSlider, maxSlider, resetBtn, missing);
+  wrapper.append(bar, labels, colorRow, minSlider, midSlider, maxSlider, resetBtn, missing);
   return wrapper;
 }
 

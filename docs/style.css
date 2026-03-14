@@ -301,6 +301,27 @@ input[type=text] { flex: 1; }
   color: #666;
   margin-top: 2px;
 }
+.heatmap-color-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.heatmap-color-picker {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.heatmap-color-picker input[type="color"] {
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  cursor: pointer;
+  background: none;
+}
 .heatmap-legend-missing {
   font-size: 11px;
   color: #777;
