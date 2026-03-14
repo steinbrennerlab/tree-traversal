@@ -842,15 +842,19 @@ function getHeatmapColumns(heatmap) {
 
 function getHeatmapColor(heatmap, value) {
   if (value == null) return "#d9d9d9";
-  const min = heatmap?.min_value;
-  const max = heatmap?.max_value;
-  if (min == null || max == null || min === max) return "#f7f7f7";
-  const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
-  if (t <= 0.5) {
-    const local = t / 0.5;
-    return interpolateColor("#2166ac", "#f7f7f7", local);
+  const min = heatmap.displayMin ?? heatmap.min_value;
+  const max = heatmap.displayMax ?? heatmap.max_value;
+  const mid = heatmap.displayMid ?? (min + max) / 2;
+  const colorLow = heatmap.colorLow || "#2166ac";
+  const colorMid = heatmap.colorMid || "#f7f7f7";
+  const colorHigh = heatmap.colorHigh || "#b2182b";
+  if (min == null || max == null || min === max) return colorMid;
+  if (value <= mid) {
+    const t = mid === min ? 1 : Math.max(0, Math.min(1, (value - min) / (mid - min)));
+    return interpolateColor(colorLow, colorMid, t);
   }
-  return interpolateColor("#f7f7f7", "#b2182b", (t - 0.5) / 0.5);
+  const t = max === mid ? 1 : Math.max(0, Math.min(1, (value - mid) / (max - mid)));
+  return interpolateColor(colorMid, colorHigh, t);
 }
 
 function interpolateColor(a, b, t) {

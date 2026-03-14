@@ -154,19 +154,96 @@ function buildHeatmapLegendElement(heatmap) {
     wrapper.style.display = "none";
     return wrapper;
   }
+
+  const dataMin = heatmap.min_value;
+  const dataMax = heatmap.max_value;
+  const curMin = heatmap.displayMin ?? dataMin;
+  const curMid = heatmap.displayMid ?? (dataMin + dataMax) / 2;
+  const curMax = heatmap.displayMax ?? dataMax;
+  const colorLow = heatmap.colorLow || "#2166ac";
+  const colorMid = heatmap.colorMid || "#f7f7f7";
+  const colorHigh = heatmap.colorHigh || "#b2182b";
+
   const bar = document.createElement("div");
   bar.className = "heatmap-legend-bar";
+  bar.style.background = `linear-gradient(90deg, ${colorLow} 0%, ${colorMid} 50%, ${colorHigh} 100%)`;
+
   const labels = document.createElement("div");
   labels.className = "heatmap-legend-labels";
-  const min = document.createElement("span");
-  min.textContent = heatmap.min_value.toFixed(2);
-  const max = document.createElement("span");
-  max.textContent = heatmap.max_value.toFixed(2);
-  labels.append(min, max);
+  const minLabel = document.createElement("span");
+  minLabel.textContent = curMin.toFixed(2);
+  const midLabel = document.createElement("span");
+  midLabel.textContent = curMid.toFixed(2);
+  const maxLabel = document.createElement("span");
+  maxLabel.textContent = curMax.toFixed(2);
+  labels.append(minLabel, midLabel, maxLabel);
+
+  // Threshold sliders
+  const step = (dataMax - dataMin) / 1000 || 0.01;
+  const range = dataMax - dataMin;
+  const sliderMin = dataMin - range * 0.5;
+  const sliderMax = dataMax + range * 0.5;
+
+  function makeSlider(label, value, onChange) {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:4px;font-size:11px;margin-top:2px;";
+    const lbl = document.createElement("span");
+    lbl.textContent = label;
+    lbl.style.width = "28px";
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = sliderMin;
+    slider.max = sliderMax;
+    slider.step = step;
+    slider.value = value;
+    slider.style.flex = "1";
+    const val = document.createElement("span");
+    val.textContent = Number(value).toFixed(2);
+    val.style.cssText = "width:50px;text-align:right;font-family:monospace;font-size:10px;";
+    slider.addEventListener("input", () => {
+      val.textContent = Number(slider.value).toFixed(2);
+      onChange(Number(slider.value));
+    });
+    row.append(lbl, slider, val);
+    return row;
+  }
+
+  const minSlider = makeSlider("Min", curMin, v => {
+    heatmap.displayMin = v;
+    invalidateRenderCache();
+    renderTree();
+    minLabel.textContent = v.toFixed(2);
+  });
+  const midSlider = makeSlider("Mid", curMid, v => {
+    heatmap.displayMid = v;
+    invalidateRenderCache();
+    renderTree();
+    midLabel.textContent = v.toFixed(2);
+  });
+  const maxSlider = makeSlider("Max", curMax, v => {
+    heatmap.displayMax = v;
+    invalidateRenderCache();
+    renderTree();
+    maxLabel.textContent = v.toFixed(2);
+  });
+
+  const resetBtn = document.createElement("button");
+  resetBtn.className = "btn-sm";
+  resetBtn.textContent = "Reset";
+  resetBtn.style.marginTop = "2px";
+  resetBtn.addEventListener("click", () => {
+    delete heatmap.displayMin;
+    delete heatmap.displayMid;
+    delete heatmap.displayMax;
+    invalidateRenderCache();
+    renderTree();
+    updateHeatmapPanels();
+  });
+
   const missing = document.createElement("div");
   missing.className = "heatmap-legend-missing";
   missing.textContent = "Missing values shown in gray";
-  wrapper.append(bar, labels, missing);
+  wrapper.append(bar, labels, minSlider, midSlider, maxSlider, resetBtn, missing);
   return wrapper;
 }
 
@@ -206,7 +283,7 @@ function refreshDatasetList() {
   updateHeatmapStatus();
 }
 
-function loadHeatmapDataset(name, preserveColumns = false, presetColumns = []) {
+function loadHeatmapDataset(name, preserveColumns = false, presetColumns = [], displayOpts = {}) {
   if (!name) return;
   const existing = state.activeHeatmaps.find(heatmap => heatmap.name === name);
   if (existing && !preserveColumns) {
@@ -242,6 +319,12 @@ function loadHeatmapDataset(name, preserveColumns = false, presetColumns = []) {
     ...data,
     visibleColumns: visibleColumns.length > 0 ? visibleColumns : getDefaultHeatmapColumns(data.columns),
   };
+  if (displayOpts.displayMin != null) next.displayMin = displayOpts.displayMin;
+  if (displayOpts.displayMid != null) next.displayMid = displayOpts.displayMid;
+  if (displayOpts.displayMax != null) next.displayMax = displayOpts.displayMax;
+  if (displayOpts.colorLow) next.colorLow = displayOpts.colorLow;
+  if (displayOpts.colorMid) next.colorMid = displayOpts.colorMid;
+  if (displayOpts.colorHigh) next.colorHigh = displayOpts.colorHigh;
   if (existing) {
     const index = state.activeHeatmaps.findIndex(heatmap => heatmap.name === name);
     state.activeHeatmaps[index] = next;
@@ -1178,6 +1261,12 @@ function saveSession() {
     activeHeatmaps: state.activeHeatmaps.map(heatmap => ({
       name: heatmap.name,
       visibleColumns: [...heatmap.visibleColumns],
+      displayMin: heatmap.displayMin,
+      displayMid: heatmap.displayMid,
+      displayMax: heatmap.displayMax,
+      colorLow: heatmap.colorLow,
+      colorMid: heatmap.colorMid,
+      colorHigh: heatmap.colorHigh,
     })),
   };
 
@@ -1297,7 +1386,7 @@ async function loadSessionV2(session, fromSetup) {
   clearHeatmapDatasets();
   if (session.activeHeatmaps) {
     for (const heatmap of session.activeHeatmaps) {
-      loadHeatmapDataset(heatmap.name, true, heatmap.visibleColumns || []);
+      loadHeatmapDataset(heatmap.name, true, heatmap.visibleColumns || [], heatmap);
     }
   }
 
@@ -1354,7 +1443,7 @@ function loadSessionV1(session, fromSetup) {
   clearHeatmapDatasets();
   if (session.activeHeatmaps) {
     for (const heatmap of session.activeHeatmaps) {
-      loadHeatmapDataset(heatmap.name, true, heatmap.visibleColumns || []);
+      loadHeatmapDataset(heatmap.name, true, heatmap.visibleColumns || [], heatmap);
     }
   }
 
