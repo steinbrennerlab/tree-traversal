@@ -990,7 +990,54 @@ function openExportPanel(nodeId) {
   document.getElementById("newick-info").textContent = `Node #${nodeId} \u2014 ${tips.length} tip${tips.length !== 1 ? "s" : ""}`;
   document.getElementById("newick-result").textContent = "";
   updateLabelInput();
+  updateExportPreview();
   document.getElementById("export-section").scrollIntoView({ behavior: "smooth" });
+}
+
+function updateExportPreview() {
+  const el = document.getElementById("export-preview");
+  const mode = document.querySelector('input[name="export-range"]:checked')?.value || "full";
+  if (mode === "full" || !state.proteinSeqs || state.selectedNodeTips.length === 0) {
+    el.style.display = "none";
+    return;
+  }
+
+  let sliceStart = null;
+  let sliceEnd = null;
+  if (mode === "columns") {
+    const s = parseInt(document.getElementById("export-col-start").value);
+    const e = parseInt(document.getElementById("export-col-end").value);
+    if (s) sliceStart = s - 1;
+    if (e) sliceEnd = e;
+  } else if (mode === "refseq") {
+    const ref = document.getElementById("export-ref-seq").value.trim();
+    const s = parseInt(document.getElementById("export-ref-start").value);
+    const e = parseInt(document.getElementById("export-ref-end").value);
+    if (ref && s && e && state.proteinSeqs[ref]) {
+      const [cs, ce] = refPosToColumns(state.proteinSeqs[ref], s, e);
+      if (cs != null && ce != null) { sliceStart = cs; sliceEnd = ce; }
+    }
+  }
+
+  const maxSeqs = 4;
+  const maxChars = 40;
+  const tips = state.selectedNodeTips;
+  const shown = tips.slice(0, maxSeqs);
+  const lines = [];
+  for (const tip of shown) {
+    const seq = state.proteinSeqs[tip];
+    if (!seq) continue;
+    const sliced = (sliceStart != null || sliceEnd != null)
+      ? seq.slice(sliceStart || 0, sliceEnd || seq.length)
+      : seq;
+    const display = sliced.length > maxChars ? sliced.slice(0, maxChars) + "\u2026" : sliced;
+    lines.push(`<span class="seq-name">&gt;${tip}</span>\n${display}`);
+  }
+  if (tips.length > maxSeqs) {
+    lines.push(`<span class="seq-ellipsis">\u2026 and ${tips.length - maxSeqs} more sequences</span>`);
+  }
+  el.innerHTML = lines.join("\n");
+  el.style.display = "";
 }
 
 // ---------------------------------------------------------------------------
@@ -2009,6 +2056,10 @@ function bindStartupControls() {
   document.getElementById("export-pdf-btn").addEventListener("click", exportPDF);
   document.getElementById("export-pdf-info-btn").addEventListener("click", exportPDFWithInfo);
   document.getElementById("export-btn").addEventListener("click", doExport);
+  document.querySelectorAll('input[name="export-range"]').forEach(r => r.addEventListener("change", updateExportPreview));
+  ["export-col-start", "export-col-end", "export-ref-seq", "export-ref-start", "export-ref-end"].forEach(id =>
+    document.getElementById(id).addEventListener("input", updateExportPreview)
+  );
   document.getElementById("export-newick-btn").addEventListener("click", exportNewick);
   document.getElementById("copy-newick-btn").addEventListener("click", copyNewick);
 }
