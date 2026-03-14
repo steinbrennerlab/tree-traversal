@@ -47,6 +47,7 @@ export const state = {
   collapsedNodes: new Set(),
   hiddenTips: new Set(),
   nodeLabels: {},
+  nodeLabelIcons: {},
   labelFontSize: 10,
 
   // Layout & render
@@ -160,6 +161,7 @@ export function resetClientState() {
   state.collapsedNodes = new Set();
   state.hiddenTips = new Set();
   state.nodeLabels = {};
+  state.nodeLabelIcons = {};
   state.labelFontSize = 10;
   state.layoutMode = "rectangular";
   state.usePhylogram = true;

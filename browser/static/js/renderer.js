@@ -68,6 +68,7 @@ function getRenderCacheKey(checkedSpecies) {
     [...state.hiddenTips].sort().join(","),
     state.labelFontSize,
     JSON.stringify(state.nodeLabels),
+    JSON.stringify(state.nodeLabelIcons),
     JSON.stringify(state.activeHeatmaps.map(heatmap => ({
       name: heatmap.name,
       visibleColumns: heatmap.visibleColumns,
@@ -393,20 +394,74 @@ function renderUnrooted(fragments, checkedSpecies) {
   draw(root);
 }
 
+const EMOJI_MAP = {
+  "e-dog":"\ud83d\udc15","e-cat":"\ud83d\udc08","e-mouse":"\ud83d\udc2d","e-rabbit":"\ud83d\udc07",
+  "e-fish":"\ud83d\udc1f","e-bird":"\ud83d\udc26","e-chicken":"\ud83d\udc14","e-cow":"\ud83d\udc04",
+  "e-pig":"\ud83d\udc16","e-horse":"\ud83d\udc0e","e-monkey":"\ud83d\udc12","e-snake":"\ud83d\udc0d",
+  "e-frog":"\ud83d\udc38","e-turtle":"\ud83d\udc22","e-bug":"\ud83d\udc1b","e-butterfly":"\ud83e\udd8b",
+  "e-bee":"\ud83d\udc1d","e-whale":"\ud83d\udc0b","e-dna":"\ud83e\uddec","e-microbe":"\ud83e\udda0",
+  "e-tree":"\ud83c\udf33","e-palm":"\ud83c\udf34","e-evergreen":"\ud83c\udf32","e-seedling":"\ud83c\udf31",
+  "e-herb":"\ud83c\udf3f","e-leaf":"\ud83c\udf43","e-flower":"\ud83c\udf3b","e-rose":"\ud83c\udf39",
+  "e-mushroom":"\ud83c\udf44","e-cactus":"\ud83c\udf35","e-corn":"\ud83c\udf3d",
+};
+
+function drawNodeIcon(fragments, cx, cy, r, fill, cls, nodeId, sup) {
+  const icon = state.nodeLabelIcons[nodeId] || "dot";
+  const attrs = `fill="${fill}" class="${cls}" data-nodeid="${nodeId}"${sup != null ? ` data-support="${sup}"` : ""}`;
+  if (EMOJI_MAP[icon]) {
+    const fontSize = r * 2.5;
+    fragments.push(`<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-size="${fontSize}" class="node-dot" data-nodeid="${nodeId}" style="cursor:pointer">${EMOJI_MAP[icon]}</text>`);
+    return;
+  }
+  switch (icon) {
+    case "star": {
+      const pts = [];
+      for (let i = 0; i < 10; i++) {
+        const a = Math.PI / 2 + i * Math.PI / 5;
+        const rad = i % 2 === 0 ? r : r * 0.45;
+        pts.push(`${cx + rad * Math.cos(a)},${cy - rad * Math.sin(a)}`);
+      }
+      fragments.push(`<polygon points="${pts.join(" ")}" ${attrs}/>`);
+      break;
+    }
+    case "square":
+      fragments.push(`<rect x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" ${attrs}/>`);
+      break;
+    case "diamond": {
+      const dr = r * 1.2;
+      fragments.push(`<polygon points="${cx},${cy - dr} ${cx + dr},${cy} ${cx},${cy + dr} ${cx - dr},${cy}" ${attrs}/>`);
+      break;
+    }
+    case "triangle":
+      fragments.push(`<polygon points="${cx},${cy - r} ${cx + r},${cy + r * 0.7} ${cx - r},${cy + r * 0.7}" ${attrs}/>`);
+      break;
+    case "none":
+      fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="transparent" class="node-dot" data-nodeid="${nodeId}"/>`);
+      break;
+    default:
+      fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" ${attrs}/>`);
+  }
+}
+
 function drawNodeDot(fragments, cx, cy, node) {
   const d = state.dotSize;
   const isSelected = node.id === state.exportNodeId;
   const isShared = state.sharedNodes.has(node.id);
-  const r = isSelected ? d * 2 : isShared ? d * 1.7 : d;
+  const hasLabel = !!state.nodeLabels[node.id];
+  const r = isSelected ? d * 2 : isShared ? d * 1.7 : hasLabel ? d * 1.5 : d;
   const ringR = d * 5;
   const fill = isSelected ? "#000" : isShared ? "#ff6600" : "#999";
   const cls = isSelected ? "node-dot selected-node" : isShared ? "node-dot shared-node" : "node-dot";
   if (isSelected) {
     fragments.push(`<circle cx="${cx}" cy="${cy}" r="${ringR}" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
   }
-  fragments.push(
-    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" class="${cls}" data-nodeid="${node.id}" ${node.sup != null ? `data-support="${node.sup}"` : ""}/>`
-  );
+  if (hasLabel) {
+    drawNodeIcon(fragments, cx, cy, r, fill, cls, node.id, node.sup);
+  } else {
+    fragments.push(
+      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" class="${cls}" data-nodeid="${node.id}" ${node.sup != null ? `data-support="${node.sup}"` : ""}/>`
+    );
+  }
   if (state.showBootstraps && node.sup != null) {
     fragments.push(`<text x="${cx + d * 2}" y="${cy - d * 1.7}" class="bootstrap-label">${node.sup}</text>`);
   }
@@ -733,6 +788,11 @@ function emitFastTrianglesAndDots(fragments, triangles, dotData) {
     const circles = group.dots.map(dot => {
       if (dot.isTip) {
         return `<circle cx="${dot.cx}" cy="${dot.cy}" r="${group.r}" fill="${group.fill}" class="tip-dot" data-tip="${dot.tipName}" data-species="${dot.species}"/>`;
+      }
+      if (state.nodeLabels[dot.nodeId]) {
+        const iconFrags = [];
+        drawNodeIcon(iconFrags, dot.cx, dot.cy, group.r, group.fill, "node-dot", dot.nodeId, dot.sup);
+        return iconFrags.join("");
       }
       return `<circle cx="${dot.cx}" cy="${dot.cy}" r="${group.r}" fill="${group.fill}" class="node-dot" data-nodeid="${dot.nodeId}"${dot.sup != null ? ` data-support="${dot.sup}"` : ""}/>`;
     }).join("");

@@ -389,6 +389,9 @@ input[type=text] { flex: 1; }
   font-size: 12px; padding: 2px 0; border-bottom: 1px solid #eee;
 }
 .label-entry .label-text { flex: 1; font-family: monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.label-text-clickable { cursor: pointer; border-radius: 2px; padding: 0 2px; }
+.label-text-clickable:hover { background: #e8f0fe; }
+.label-icon-select { width: 36px; height: 22px; padding: 0 2px; flex-shrink: 0; font-size: 13px; border: 1px solid #bbb; border-radius: 3px; cursor: pointer; }
 
 /* Disabled controls */
 input:disabled, select:disabled, button:disabled { opacity: 0.5; cursor: default; }

@@ -287,6 +287,49 @@ function updateLabelInput() {
   document.getElementById("node-label-input").value = state.nodeLabels[state.exportNodeId] || "";
 }
 
+const LABEL_ICONS = [
+  // Shapes
+  { id: "dot", label: "\u25cf" },
+  { id: "star", label: "\u2605" },
+  { id: "square", label: "\u25a0" },
+  { id: "diamond", label: "\u25c6" },
+  { id: "triangle", label: "\u25b2" },
+  { id: "none", label: "\u2013" },
+  // Animals
+  { id: "e-dog", label: "\ud83d\udc15" },
+  { id: "e-cat", label: "\ud83d\udc08" },
+  { id: "e-mouse", label: "\ud83d\udc2d" },
+  { id: "e-rabbit", label: "\ud83d\udc07" },
+  { id: "e-fish", label: "\ud83d\udc1f" },
+  { id: "e-bird", label: "\ud83d\udc26" },
+  { id: "e-chicken", label: "\ud83d\udc14" },
+  { id: "e-cow", label: "\ud83d\udc04" },
+  { id: "e-pig", label: "\ud83d\udc16" },
+  { id: "e-horse", label: "\ud83d\udc0e" },
+  { id: "e-monkey", label: "\ud83d\udc12" },
+  { id: "e-snake", label: "\ud83d\udc0d" },
+  { id: "e-frog", label: "\ud83d\udc38" },
+  { id: "e-turtle", label: "\ud83d\udc22" },
+  { id: "e-bug", label: "\ud83d\udc1b" },
+  { id: "e-butterfly", label: "\ud83e\udd8b" },
+  { id: "e-bee", label: "\ud83d\udc1d" },
+  { id: "e-whale", label: "\ud83d\udc0b" },
+  { id: "e-dna", label: "\ud83e\uddec" },
+  { id: "e-microbe", label: "\ud83e\udda0" },
+  // Plants
+  { id: "e-tree", label: "\ud83c\udf33" },
+  { id: "e-palm", label: "\ud83c\udf34" },
+  { id: "e-evergreen", label: "\ud83c\udf32" },
+  { id: "e-seedling", label: "\ud83c\udf31" },
+  { id: "e-herb", label: "\ud83c\udf3f" },
+  { id: "e-leaf", label: "\ud83c\udf43" },
+  { id: "e-flower", label: "\ud83c\udf3b" },
+  { id: "e-rose", label: "\ud83c\udf39" },
+  { id: "e-mushroom", label: "\ud83c\udf44" },
+  { id: "e-cactus", label: "\ud83c\udf35" },
+  { id: "e-corn", label: "\ud83c\udf3d" },
+];
+
 function buildLabelList() {
   const container = document.getElementById("label-list");
   container.innerHTML = "";
@@ -295,20 +338,70 @@ function buildLabelList() {
   for (const [nodeId, label] of Object.entries(state.nodeLabels)) {
     const row = document.createElement("div");
     row.className = "label-entry";
+
+    // Icon picker dropdown
+    const iconSelect = document.createElement("select");
+    iconSelect.className = "label-icon-select";
+    const curIconId = state.nodeLabelIcons[nodeId] || "dot";
+    for (const icon of LABEL_ICONS) {
+      const opt = document.createElement("option");
+      opt.value = icon.id;
+      opt.textContent = icon.label;
+      if (icon.id === curIconId) opt.selected = true;
+      iconSelect.appendChild(opt);
+    }
+    iconSelect.addEventListener("change", () => {
+      state.nodeLabelIcons[nodeId] = iconSelect.value;
+      invalidateRenderCache();
+      renderTree();
+    });
+
+    // Clickable label text for renaming
     const text = document.createElement("span");
-    text.className = "label-text";
-    text.textContent = `#${nodeId}: ${label}`;
+    text.className = "label-text label-text-clickable";
+    text.textContent = label;
+    text.title = "Click to rename";
+    text.addEventListener("click", () => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = label;
+      input.className = "label-rename-input";
+      input.style.cssText = "flex:1;font-size:11px;font-family:monospace;padding:1px 4px;";
+      text.replaceWith(input);
+      input.focus();
+      input.select();
+      const commit = () => {
+        const newVal = input.value.trim();
+        if (newVal) {
+          state.nodeLabels[nodeId] = newVal;
+        } else {
+          delete state.nodeLabels[nodeId];
+          delete state.nodeLabelIcons[nodeId];
+        }
+        invalidateRenderCache();
+        renderTree();
+        buildLabelList();
+        updateLabelInput();
+      };
+      input.addEventListener("blur", commit);
+      input.addEventListener("keydown", e => {
+        if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+        if (e.key === "Escape") { input.value = label; input.blur(); }
+      });
+    });
+
     const removeBtn = document.createElement("button");
     removeBtn.className = "motif-remove";
     removeBtn.textContent = "\u00d7";
     removeBtn.addEventListener("click", () => {
       delete state.nodeLabels[nodeId];
+      delete state.nodeLabelIcons[nodeId];
       invalidateRenderCache();
       renderTree();
       buildLabelList();
       updateLabelInput();
     });
-    row.append(text, removeBtn);
+    row.append(iconSelect, text, removeBtn);
     container.appendChild(row);
   }
 }
@@ -519,6 +612,7 @@ function captureState() {
     ty: state.ty,
     hiddenTips: new Set(state.hiddenTips),
     nodeLabels: { ...state.nodeLabels },
+    nodeLabelIcons: { ...state.nodeLabelIcons },
   };
 }
 
@@ -533,6 +627,7 @@ function restoreState(snapshot) {
   state.ty = snapshot.ty;
   state.hiddenTips = snapshot.hiddenTips;
   state.nodeLabels = snapshot.nodeLabels;
+  state.nodeLabelIcons = snapshot.nodeLabelIcons || {};
   state.nodeById = {};
   state.parentMap = {};
   indexNodes(state.treeData);
@@ -1057,6 +1152,7 @@ function saveSession() {
     fullTreeData: state.fullTreeData,
     collapsedNodes: [...state.collapsedNodes],
     nodeLabels: state.nodeLabels,
+    nodeLabelIcons: state.nodeLabelIcons,
     labelFontSize: state.labelFontSize,
     exportNodeId: state.exportNodeId,
     selectedTip: state.selectedTip,
@@ -1273,6 +1369,7 @@ function loadSessionV1(session, fromSetup) {
 function applySessionSettings(session) {
   state.collapsedNodes = new Set(session.collapsedNodes || []);
   state.nodeLabels = session.nodeLabels || {};
+  state.nodeLabelIcons = session.nodeLabelIcons || {};
   state.labelFontSize = session.labelFontSize ?? 10;
   state.exportNodeId = session.exportNodeId ?? null;
   state.selectedTip = session.selectedTip ?? null;
