@@ -119,13 +119,28 @@
   </div>
 
   <div class="section">
-    <h3>Name Search</h3>
+    <h3>Name Search (Tip labels)</h3>
     <div class="row">
       <input type="text" id="name-input" placeholder="e.g. Phvul or YS121">
       <button id="name-search" class="btn">Search</button>
     </div>
     <div id="name-result"></div>
     <div id="name-matches-list" class="name-matches-list"></div>
+  </div>
+
+  <div class="section">
+    <h3>Clade Labels</h3>
+    <div id="label-input-container" style="display:none;">
+      <div class="row">
+        <input type="text" id="node-label-input" placeholder="Label for selected node">
+        <button id="set-label-btn" class="btn">Set</button>
+      </div>
+    </div>
+    <div id="label-size-container" class="row" style="display:none;">
+      <label>Label size (pt): <input type="number" id="label-font-size" min="1" max="72" value="10" style="width:48px;"></label>
+    </div>
+    <div id="label-list"></div>
+    <p class="hint" id="label-hint">Select a node to add a label</p>
   </div>
 
   <div class="section">
@@ -173,21 +188,6 @@
       <button id="filter-show-all-btn" class="btn-sm">Show all</button>
     </div>
     <div id="filter-result" class="hint"></div>
-  </div>
-
-  <div class="section">
-    <h3>Clade Labels</h3>
-    <div id="label-input-container" style="display:none;">
-      <div class="row">
-        <input type="text" id="node-label-input" placeholder="Label for selected node">
-        <button id="set-label-btn" class="btn">Set</button>
-      </div>
-    </div>
-    <div id="label-size-container" class="row" style="display:none;">
-      <label>Label size (pt): <input type="number" id="label-font-size" min="1" max="72" value="10" style="width:48px;"></label>
-    </div>
-    <div id="label-list"></div>
-    <p class="hint" id="label-hint">Select a node to add a label</p>
   </div>
 
   <div class="section">
