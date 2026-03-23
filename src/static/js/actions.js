@@ -696,13 +696,20 @@ function buildTipLabelList() {
       renderTree();
     });
 
-    // Label text
+    // Label text — click to pan to tip
     const text = document.createElement("span");
     text.className = "label-text label-text-clickable";
     text.textContent = tipName + (marker.text ? ` [${marker.text}]` : "");
-    text.title = "Click to rename";
+    text.title = "Click to pan to tip";
     text.style.cssText = "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;";
-    text.addEventListener("click", () => {
+    text.addEventListener("click", () => selectNameTip(tipName));
+
+    // Rename button
+    const renameBtn = document.createElement("button");
+    renameBtn.className = "motif-remove";
+    renameBtn.textContent = "\u270e";
+    renameBtn.title = "Rename label";
+    renameBtn.addEventListener("click", () => {
       const input = document.createElement("input");
       input.type = "text";
       input.value = marker.text || "";
@@ -738,7 +745,7 @@ function buildTipLabelList() {
       buildTipLabelList();
     });
 
-    row.append(swatch, iconSelect, text, removeBtn);
+    row.append(swatch, iconSelect, text, renameBtn, removeBtn);
     container.appendChild(row);
   }
 }
