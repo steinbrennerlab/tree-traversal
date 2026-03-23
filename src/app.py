@@ -400,7 +400,7 @@ def load_data(input_dir_str, nwk_file=None, aa_file=None):
     """
     global _node_counter
 
-    # Resolve relative paths against the project root (parent of browser/)
+    # Resolve relative paths against the project root (parent of src/)
     PROJECT_ROOT = Path(__file__).resolve().parent.parent
     input_path = Path(input_dir_str)
     if not input_path.is_absolute():

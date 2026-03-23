@@ -19,8 +19,8 @@ Thumbs.db
 # Ignore all subfolders except the ones we want
 /*/
 !example_data/
-!browser/
+!src/
 !docs/
 
 # Build artifacts
-browser/node_modules/
+src/node_modules/

@@ -10,6 +10,7 @@ body { display: flex; height: 100vh; font-family: system-ui, sans-serif; font-si
 #sidebar h2 { font-size: 16px; margin: 0; }
 #sidebar h3 { font-size: 13px; margin-bottom: 6px; color: #444; }
 .section { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #ddd; }
+#loaded-info-section { position: sticky; top: 0; z-index: 10; background: #f5f5f5; padding-top: 4px; border-top: 2px solid #ccc; border-bottom: 2px solid #ccc; margin-bottom: 14px; padding-bottom: 10px; }
 .row { margin-bottom: 6px; display: flex; gap: 6px; align-items: center; }
 .hint { font-size: 11px; color: #888; margin-bottom: 4px; }
 .loaded-value { word-break: break-word; }
@@ -85,6 +86,10 @@ input[type=text] { flex: 1; }
 .name-match-item { padding: 2px 4px; cursor: pointer; color: #2563eb; border-radius: 2px; }
 .name-match-item:hover { background: #e8f0fe; }
 .name-match-item.name-match-active { background: #fde8e8; color: #e22; font-weight: bold; }
+
+/* Tip label entries */
+.tip-label-entry { display: flex; align-items: center; gap: 4px; padding: 2px 0; font-size: 12px; }
+.tip-label-swatch { width: 14px; height: 14px; border-radius: 2px; border: 1px solid #999; cursor: pointer; flex-shrink: 0; }
 
 /* Selected tip ring on tree */
 .selected-tip-ring { pointer-events: none; }

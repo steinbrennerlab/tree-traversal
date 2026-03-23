@@ -402,6 +402,18 @@ function updateLabelInput() {
   }
   container.style.display = "";
   document.getElementById("node-label-input").value = state.nodeLabels[state.exportNodeId] || "";
+  const curColor = state.nodeLabelColors[state.exportNodeId] || "#333";
+  const colorSel = document.getElementById("node-label-color-select");
+  const colorCustom = document.getElementById("node-label-color-custom");
+  const presetOpt = [...colorSel.options].find(o => o.value === curColor);
+  if (presetOpt) {
+    colorSel.value = curColor;
+    colorCustom.style.display = "none";
+  } else {
+    colorSel.value = "custom";
+    colorCustom.value = curColor;
+    colorCustom.style.display = "";
+  }
 }
 
 const LABEL_ICONS = [
@@ -474,6 +486,28 @@ function buildLabelList() {
       renderTree();
     });
 
+    // Color swatch
+    const swatch = document.createElement("span");
+    swatch.className = "tip-label-swatch";
+    swatch.style.background = state.nodeLabelColors[nodeId] || "#333";
+    swatch.title = "Click to change color";
+    swatch.addEventListener("click", () => {
+      const picker = document.createElement("input");
+      picker.type = "color";
+      picker.value = state.nodeLabelColors[nodeId] || "#333333";
+      picker.style.cssText = "position:absolute;opacity:0;width:0;height:0;";
+      document.body.appendChild(picker);
+      picker.addEventListener("input", () => {
+        pushUndo();
+        state.nodeLabelColors[nodeId] = picker.value;
+        swatch.style.background = picker.value;
+        invalidateRenderCache();
+        renderTree();
+      });
+      picker.addEventListener("change", () => picker.remove());
+      picker.click();
+    });
+
     // Clickable label text for renaming
     const text = document.createElement("span");
     text.className = "label-text label-text-clickable";
@@ -496,6 +530,7 @@ function buildLabelList() {
         } else {
           delete state.nodeLabels[nodeId];
           delete state.nodeLabelIcons[nodeId];
+          delete state.nodeLabelColors[nodeId];
         }
         invalidateRenderCache();
         renderTree();
@@ -516,12 +551,194 @@ function buildLabelList() {
       pushUndo();
       delete state.nodeLabels[nodeId];
       delete state.nodeLabelIcons[nodeId];
+      delete state.nodeLabelColors[nodeId];
       invalidateRenderCache();
       renderTree();
       buildLabelList();
       updateLabelInput();
     });
-    row.append(iconSelect, text, removeBtn);
+    row.append(swatch, iconSelect, text, removeBtn);
+    container.appendChild(row);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tip markers (persistent tip labels with color & symbol)
+// ---------------------------------------------------------------------------
+
+function updateTipLabelInput() {
+  const container = document.getElementById("tip-label-input-container");
+  if (!state.selectedTip) {
+    container.style.display = "none";
+    return;
+  }
+  container.style.display = "";
+  const existing = state.tipMarkers[state.selectedTip];
+  document.getElementById("tip-label-input").value = existing ? existing.text || "" : "";
+  const colorSel = document.getElementById("tip-label-color-select");
+  const colorCustom = document.getElementById("tip-label-color-custom");
+  if (existing && existing.color) {
+    const presetOpt = [...colorSel.options].find(o => o.value === existing.color);
+    if (presetOpt) {
+      colorSel.value = existing.color;
+      colorCustom.style.display = "none";
+    } else {
+      colorSel.value = "custom";
+      colorCustom.value = existing.color;
+      colorCustom.style.display = "";
+    }
+  } else {
+    colorSel.value = "#e22";
+    colorCustom.style.display = "none";
+  }
+  // Populate icon select
+  const iconSel = document.getElementById("tip-label-icon-select");
+  if (iconSel.options.length === 0) {
+    for (const icon of LABEL_ICONS) {
+      const opt = document.createElement("option");
+      opt.value = icon.id;
+      opt.textContent = icon.label;
+      iconSel.appendChild(opt);
+    }
+  }
+  iconSel.value = existing && existing.icon ? existing.icon : "dot";
+}
+
+function getTipLabelColor() {
+  const sel = document.getElementById("tip-label-color-select");
+  return sel.value === "custom" ? document.getElementById("tip-label-color-custom").value : sel.value;
+}
+
+function handleTipLabelsUpload(file) {
+  if (!state.treeData) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const lines = reader.result.split(/\r?\n/);
+    const allTips = new Set(collectAllTipNames(state.treeData));
+    const names = [];
+    for (const line of lines) {
+      const col = line.split("\t")[0].trim();
+      if (col) names.push(col);
+    }
+    pushUndo();
+    let matched = 0;
+    for (const name of names) {
+      if (allTips.has(name) && !state.tipMarkers[name]) {
+        state.tipMarkers[name] = { text: "", color: "#e22", icon: "dot" };
+        matched++;
+      }
+    }
+    const notFound = names.length - matched;
+    const resultEl = document.getElementById("tip-labels-upload-result");
+    resultEl.textContent = `${matched} tips labeled` + (notFound > 0 ? ` (${notFound} names not found)` : "");
+    invalidateRenderCache();
+    renderTree();
+    buildTipLabelList();
+  };
+  reader.readAsText(file);
+}
+
+function setTipLabel() {
+  if (!state.selectedTip) return;
+  pushUndo();
+  const text = document.getElementById("tip-label-input").value.trim();
+  const color = getTipLabelColor();
+  const icon = document.getElementById("tip-label-icon-select").value;
+  state.tipMarkers[state.selectedTip] = { text, color, icon };
+  invalidateRenderCache();
+  renderTree();
+  buildTipLabelList();
+}
+
+function buildTipLabelList() {
+  const container = document.getElementById("tip-label-list");
+  container.innerHTML = "";
+  for (const [tipName, marker] of Object.entries(state.tipMarkers)) {
+    const row = document.createElement("div");
+    row.className = "tip-label-entry";
+
+    // Color swatch
+    const swatch = document.createElement("span");
+    swatch.className = "tip-label-swatch";
+    swatch.style.background = marker.color || "#333";
+    swatch.title = "Click to change color";
+    swatch.addEventListener("click", () => {
+      const picker = document.createElement("input");
+      picker.type = "color";
+      picker.value = marker.color || "#333333";
+      picker.style.cssText = "position:absolute;opacity:0;width:0;height:0;";
+      document.body.appendChild(picker);
+      picker.addEventListener("input", () => {
+        pushUndo();
+        marker.color = picker.value;
+        swatch.style.background = picker.value;
+        invalidateRenderCache();
+        renderTree();
+      });
+      picker.addEventListener("change", () => picker.remove());
+      picker.click();
+    });
+
+    // Icon picker
+    const iconSelect = document.createElement("select");
+    iconSelect.className = "label-icon-select";
+    for (const icon of LABEL_ICONS) {
+      const opt = document.createElement("option");
+      opt.value = icon.id;
+      opt.textContent = icon.label;
+      if (icon.id === (marker.icon || "dot")) opt.selected = true;
+      iconSelect.appendChild(opt);
+    }
+    iconSelect.addEventListener("change", () => {
+      pushUndo();
+      marker.icon = iconSelect.value;
+      invalidateRenderCache();
+      renderTree();
+    });
+
+    // Label text
+    const text = document.createElement("span");
+    text.className = "label-text label-text-clickable";
+    text.textContent = tipName + (marker.text ? ` [${marker.text}]` : "");
+    text.title = "Click to rename";
+    text.style.cssText = "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;";
+    text.addEventListener("click", () => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = marker.text || "";
+      input.className = "label-rename-input";
+      input.style.cssText = "flex:1;font-size:11px;font-family:monospace;padding:1px 4px;";
+      text.replaceWith(input);
+      input.focus();
+      input.select();
+      const commit = () => {
+        const newVal = input.value.trim();
+        pushUndo();
+        marker.text = newVal;
+        invalidateRenderCache();
+        renderTree();
+        buildTipLabelList();
+      };
+      input.addEventListener("blur", commit);
+      input.addEventListener("keydown", e => {
+        if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+        if (e.key === "Escape") { input.value = marker.text || ""; input.blur(); }
+      });
+    });
+
+    // Remove button
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "motif-remove";
+    removeBtn.textContent = "\u00d7";
+    removeBtn.addEventListener("click", () => {
+      pushUndo();
+      delete state.tipMarkers[tipName];
+      invalidateRenderCache();
+      renderTree();
+      buildTipLabelList();
+    });
+
+    row.append(swatch, iconSelect, text, removeBtn);
     container.appendChild(row);
   }
 }
@@ -733,6 +950,8 @@ function captureState() {
     hiddenTips: new Set(state.hiddenTips),
     nodeLabels: { ...state.nodeLabels },
     nodeLabelIcons: { ...state.nodeLabelIcons },
+    nodeLabelColors: { ...state.nodeLabelColors },
+    tipMarkers: JSON.parse(JSON.stringify(state.tipMarkers)),
     labelFontSize: state.labelFontSize,
     layoutMode: state.layoutMode,
     usePhylogram: state.usePhylogram,
@@ -760,6 +979,8 @@ function restoreState(snapshot) {
   state.hiddenTips = snapshot.hiddenTips;
   state.nodeLabels = snapshot.nodeLabels;
   state.nodeLabelIcons = snapshot.nodeLabelIcons || {};
+  state.nodeLabelColors = snapshot.nodeLabelColors || {};
+  state.tipMarkers = snapshot.tipMarkers || {};
   // Restore display settings (use fallback defaults for older snapshots)
   state.labelFontSize = snapshot.labelFontSize ?? state.labelFontSize;
   state.layoutMode = snapshot.layoutMode ?? state.layoutMode;
@@ -800,7 +1021,9 @@ function restoreState(snapshot) {
   invalidateRenderCache();
   updateFilterBadge();
   buildLabelList();
+  buildTipLabelList();
   updateLabelInput();
+  updateTipLabelInput();
   updateUndoRedoButtons();
   updateTriangleControls();
   renderTree();
@@ -1033,7 +1256,12 @@ function openExportPanel(nodeId) {
   document.getElementById("newick-result").textContent = "";
   updateLabelInput();
   updateExportPreview();
-  document.getElementById("export-section").scrollIntoView({ behavior: "smooth" });
+  // Scroll to Clade Labels, accounting for sticky Loaded Data panel
+  const labelSection = document.getElementById("label-input-container").closest(".section");
+  const sidebar = document.getElementById("sidebar");
+  const stickyPanel = document.getElementById("loaded-info-section");
+  const stickyH = stickyPanel ? stickyPanel.offsetHeight : 0;
+  sidebar.scrollTop = labelSection.offsetTop - stickyH - 8;
 }
 
 function updateExportPreview() {
@@ -1125,6 +1353,7 @@ function selectNameTip(tipName) {
   document.querySelectorAll(".name-match-item").forEach(el => {
     el.classList.toggle("name-match-active", el.textContent === tipName);
   });
+  updateTipLabelInput();
   invalidateRenderCache();
   renderTree();
   const ring = dom.group.querySelector(".selected-tip-ring");
@@ -1294,14 +1523,22 @@ function showAllTips() {
   document.getElementById("filter-result").textContent = "";
 }
 
+function getNodeLabelColor() {
+  const sel = document.getElementById("node-label-color-select");
+  return sel.value === "custom" ? document.getElementById("node-label-color-custom").value : sel.value;
+}
+
 function setNodeLabel() {
   if (state.exportNodeId == null) return;
   const value = document.getElementById("node-label-input").value.trim();
+  const color = getNodeLabelColor();
   pushUndo();
   if (value) {
     state.nodeLabels[state.exportNodeId] = value;
+    state.nodeLabelColors[state.exportNodeId] = color;
   } else {
     delete state.nodeLabels[state.exportNodeId];
+    delete state.nodeLabelColors[state.exportNodeId];
   }
   invalidateRenderCache();
   renderTree();
@@ -1367,6 +1604,8 @@ function saveSession() {
     collapsedNodes: [...state.collapsedNodes],
     nodeLabels: state.nodeLabels,
     nodeLabelIcons: state.nodeLabelIcons,
+    nodeLabelColors: state.nodeLabelColors,
+    tipMarkers: state.tipMarkers,
     labelFontSize: state.labelFontSize,
     exportNodeId: state.exportNodeId,
     selectedTip: state.selectedTip,
@@ -1528,7 +1767,9 @@ async function loadSessionV2(session, fromSetup) {
 
   updateFilterBadge();
   buildLabelList();
+  buildTipLabelList();
   updateLabelInput();
+  updateTipLabelInput();
   invalidateRenderCache();
   renderTree();
   document.getElementById("session-result").textContent = "Session loaded.";
@@ -1590,6 +1831,8 @@ function applySessionSettings(session) {
   state.collapsedNodes = new Set(session.collapsedNodes || []);
   state.nodeLabels = session.nodeLabels || {};
   state.nodeLabelIcons = session.nodeLabelIcons || {};
+  state.nodeLabelColors = session.nodeLabelColors || {};
+  state.tipMarkers = session.tipMarkers || {};
   state.labelFontSize = session.labelFontSize ?? 10;
   state.exportNodeId = session.exportNodeId ?? null;
   state.selectedTip = session.selectedTip ?? null;
@@ -2048,6 +2291,7 @@ function initAfterLoad() {
   loadTipDatalist();
   applyFastaState();
   buildLabelList();
+  buildTipLabelList();
   updateFilterBadge();
 }
 
@@ -2274,6 +2518,24 @@ function setupControls() {
   document.getElementById("node-label-input").addEventListener("keydown", event => {
     if (event.key === "Enter") setNodeLabel();
   });
+  document.getElementById("set-tip-label-btn").addEventListener("click", setTipLabel);
+  document.getElementById("tip-label-input").addEventListener("keydown", event => {
+    if (event.key === "Enter") setTipLabel();
+  });
+  const tipLabelsFileInput = document.getElementById("tip-labels-file");
+  document.getElementById("upload-tip-labels-btn").addEventListener("click", () => tipLabelsFileInput.click());
+  tipLabelsFileInput.addEventListener("change", () => {
+    if (tipLabelsFileInput.files[0]) handleTipLabelsUpload(tipLabelsFileInput.files[0]);
+    tipLabelsFileInput.value = "";
+  });
+  document.getElementById("tip-label-color-select").addEventListener("change", event => {
+    const custom = document.getElementById("tip-label-color-custom");
+    custom.style.display = event.target.value === "custom" ? "" : "none";
+  });
+  document.getElementById("node-label-color-select").addEventListener("change", event => {
+    const custom = document.getElementById("node-label-color-custom");
+    custom.style.display = event.target.value === "custom" ? "" : "none";
+  });
   const labelFontSizeEl = document.getElementById("label-font-size");
   sliderUndoOnce(labelFontSizeEl);
   labelFontSizeEl.addEventListener("input", event => {
@@ -2337,7 +2599,11 @@ function onTreeClick(event) {
       if (state.hasFasta) copyTipFasta(tipName);
       return;
     }
+    state.selectedTip = tipName;
     copyTipName(tipName);
+    updateTipLabelInput();
+    invalidateRenderCache();
+    renderTree();
     return;
   }
 

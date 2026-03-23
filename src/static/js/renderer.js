@@ -69,6 +69,8 @@ function getRenderCacheKey(checkedSpecies) {
     state.labelFontSize,
     JSON.stringify(state.nodeLabels),
     JSON.stringify(state.nodeLabelIcons),
+    JSON.stringify(state.nodeLabelColors),
+    JSON.stringify(state.tipMarkers),
     JSON.stringify(state.activeHeatmaps.map(heatmap => ({
       name: heatmap.name,
       visibleColumns: heatmap.visibleColumns,
@@ -185,6 +187,8 @@ function renderRectangular(fragments, checkedSpecies) {
         `<polygon points="${nx},${ny} ${nx + triW},${ny - triH / 2} ${nx + triW},${ny + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
         `<text x="${nx + triW + 4}" y="${ny + 3}" font-size="9" fill="#666">${triLabel}</text>`
       );
+      drawNodeDot(fragments, nx, ny, node);
+      drawCollapsedTipMarkers(fragments, nx + triW + 4, ny, node, 0, 12);
       if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
         fragments.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
       }
@@ -271,6 +275,8 @@ function renderCircular(fragments, checkedSpecies) {
         `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
         `<text x="${(wx1 + wx2) / 2 + 4}" y="${(wy1 + wy2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
       );
+      drawNodeDot(fragments, nx, ny, node);
+      drawCollapsedTipMarkers(fragments, (wx1 + wx2) / 2 + 4, (wy1 + wy2) / 2, node, 0, 12);
       if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
         fragments.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
       }
@@ -370,6 +376,8 @@ function renderUnrooted(fragments, checkedSpecies) {
         `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
         `<text x="${(x1 + x2) / 2 + 2}" y="${(y1 + y2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
       );
+      drawNodeDot(fragments, node.x, node.y, node);
+      drawCollapsedTipMarkers(fragments, (x1 + x2) / 2 + 2, (y1 + y2) / 2, node, 0, 12);
       if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
         fragments.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
       }
@@ -443,14 +451,34 @@ function drawNodeIcon(fragments, cx, cy, r, fill, cls, nodeId, sup) {
   }
 }
 
+function drawCollapsedTipMarkers(fragments, cx, cy, node, offsetX, offsetY) {
+  const tips = collectAllTipNames(node);
+  const d = state.dotSize;
+  const fontSize = state.tipLabelSize;
+  const charW = fontSize * 0.6;
+  let curX = cx + offsetX;
+  const my = cy + offsetY;
+  for (const tipName of tips) {
+    const marker = state.tipMarkers[tipName];
+    if (!marker) continue;
+    const color = marker.color || "#333";
+    drawTipIcon(fragments, curX, my, d * 1.2, color, tipName, "", marker.icon || "dot");
+    const label = marker.text ? `${tipName} [${marker.text}]` : tipName;
+    const textX = curX + d * 2;
+    fragments.push(`<text x="${textX}" y="${my + fontSize * 0.35}" font-size="${fontSize}" fill="${color}" class="tip-label" data-tip="${tipName}" data-species="">${label}</text>`);
+    curX = textX + label.length * charW + d * 2;
+  }
+}
+
 function drawNodeDot(fragments, cx, cy, node) {
   const d = state.dotSize;
   const isSelected = node.id === state.exportNodeId;
   const isShared = state.sharedNodes.has(node.id);
   const hasLabel = !!state.nodeLabels[node.id];
+  const labelColor = state.nodeLabelColors[node.id];
   const r = isSelected ? d * 2 : isShared ? d * 1.7 : hasLabel ? d * 1.5 : d;
   const ringR = d * 5;
-  const fill = isSelected ? "#000" : isShared ? "#ff6600" : "#999";
+  const fill = hasLabel && labelColor ? labelColor : isSelected ? "#000" : isShared ? "#ff6600" : "#999";
   const cls = isSelected ? "node-dot selected-node" : isShared ? "node-dot shared-node" : "node-dot";
   if (isSelected) {
     fragments.push(`<circle cx="${cx}" cy="${cy}" r="${ringR}" fill="none" stroke="#e22" stroke-width="3" class="selected-node-ring"/>`);
@@ -466,7 +494,46 @@ function drawNodeDot(fragments, cx, cy, node) {
     fragments.push(`<text x="${cx + d * 2}" y="${cy - d * 1.7}" class="bootstrap-label">${node.sup}</text>`);
   }
   if (state.nodeLabels[node.id]) {
-    fragments.push(`<text x="${cx + d * 2.5}" y="${cy + d * 1.3}" class="node-label" font-size="${state.labelFontSize}">${state.nodeLabels[node.id]}</text>`);
+    const textColor = labelColor || "";
+    const fillAttr = textColor ? ` fill="${textColor}"` : "";
+    fragments.push(`<text x="${cx + d * 2.5}" y="${cy + d * 1.3}" class="node-label" font-size="${state.labelFontSize}"${fillAttr}>${state.nodeLabels[node.id]}</text>`);
+  }
+}
+
+function drawTipIcon(fragments, cx, cy, r, fill, tipName, species, icon) {
+  const attrs = `fill="${fill}" class="tip-dot" data-tip="${tipName}" data-species="${species}"`;
+  if (EMOJI_MAP[icon]) {
+    const fontSize = r * 2.5;
+    fragments.push(`<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-size="${fontSize}" class="tip-dot" data-tip="${tipName}" data-species="${species}" style="cursor:pointer">${EMOJI_MAP[icon]}</text>`);
+    return;
+  }
+  switch (icon) {
+    case "star": {
+      const pts = [];
+      for (let i = 0; i < 10; i++) {
+        const a = Math.PI / 2 + i * Math.PI / 5;
+        const rad = i % 2 === 0 ? r : r * 0.45;
+        pts.push(`${cx + rad * Math.cos(a)},${cy - rad * Math.sin(a)}`);
+      }
+      fragments.push(`<polygon points="${pts.join(" ")}" ${attrs}/>`);
+      break;
+    }
+    case "square":
+      fragments.push(`<rect x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" ${attrs}/>`);
+      break;
+    case "diamond": {
+      const dr = r * 1.2;
+      fragments.push(`<polygon points="${cx},${cy - dr} ${cx + dr},${cy} ${cx},${cy + dr} ${cx - dr},${cy}" ${attrs}/>`);
+      break;
+    }
+    case "triangle":
+      fragments.push(`<polygon points="${cx},${cy - r} ${cx + r},${cy + r * 0.7} ${cx - r},${cy + r * 0.7}" ${attrs}/>`);
+      break;
+    case "none":
+      fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="transparent" class="tip-dot" data-tip="${tipName}" data-species="${species}"/>`);
+      break;
+    default:
+      fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" ${attrs}/>`);
   }
 }
 
@@ -474,8 +541,9 @@ function drawTipDot(fragments, cx, cy, node, checkedSpecies) {
   const d = state.dotSize;
   const isMotif = state.motifMatches.has(node.name);
   const isName = state.nameMatches.has(node.name);
+  const marker = state.tipMarkers[node.name];
   const spColor = getNodeColor(node, checkedSpecies);
-  const r = isMotif || isName || spColor !== "#333" ? d : d * 0.7;
+  const r = marker ? d * 1.5 : isMotif || isName || spColor !== "#333" ? d : d * 0.7;
   if (node.name === state.selectedTip) {
     fragments.push(`<circle cx="${cx}" cy="${cy}" r="${d * 5}" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
   }
@@ -486,20 +554,27 @@ function drawTipDot(fragments, cx, cy, node, checkedSpecies) {
       return;
     }
   }
-  const color = isName ? "#2563eb" : spColor;
-  fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" class="tip-dot" data-tip="${node.name}" data-species="${node.sp || ""}"/>`);
+  if (marker && marker.icon && marker.icon !== "dot") {
+    const fill = marker.color || (isName ? "#2563eb" : spColor);
+    drawTipIcon(fragments, cx, cy, r, fill, node.name, node.sp || "", marker.icon);
+  } else {
+    const color = marker ? (marker.color || spColor) : isName ? "#2563eb" : spColor;
+    fragments.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" class="tip-dot" data-tip="${node.name}" data-species="${node.sp || ""}"/>`);
+  }
 }
 
 function drawTipLabel(fragments, x, y, rotation, node, checkedSpecies) {
   const isMotif = state.motifMatches.has(node.name);
   const isName = state.nameMatches.has(node.name);
+  const marker = state.tipMarkers[node.name];
   const highlight = isMotif || isName;
   const motifColors = isMotif ? getMotifColors(node.name) : [];
-  const color = isMotif && motifColors.length > 0 ? motifColors[0] : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
+  const color = marker ? marker.color : isMotif && motifColors.length > 0 ? motifColors[0] : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
   const bold = highlight ? ' font-weight="bold"' : "";
   const transform = rotation ? ` transform="rotate(${rotation},${x},${y})"` : "";
   const label = getTipLabelText(node);
-  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}" font-size="${state.tipLabelSize}"${bold}${transform} data-tip="${node.name}" data-species="${node.sp || ""}">${label}</text>`);
+  const suffix = marker && marker.text ? ` [${marker.text}]` : "";
+  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}" font-size="${state.tipLabelSize}"${bold}${transform} data-tip="${node.name}" data-species="${node.sp || ""}">${label}${suffix}</text>`);
   if (isMotif && motifColors.length > 0) {
     drawMotifPie(fragments, x - 4, y - 3, 3, motifColors);
   }
@@ -511,12 +586,14 @@ function drawTipLabel(fragments, x, y, rotation, node, checkedSpecies) {
 function drawTipLabelRadial(fragments, x, y, angleDeg, anchor, node, checkedSpecies) {
   const isMotif = state.motifMatches.has(node.name);
   const isName = state.nameMatches.has(node.name);
+  const marker = state.tipMarkers[node.name];
   const highlight = isMotif || isName;
   const motifColors = isMotif ? getMotifColors(node.name) : [];
-  const color = isMotif && motifColors.length > 0 ? motifColors[0] : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
+  const color = marker ? marker.color : isMotif && motifColors.length > 0 ? motifColors[0] : isName ? "#2563eb" : getNodeColor(node, checkedSpecies);
   const bold = highlight ? ' font-weight="bold"' : "";
   const label = getTipLabelText(node);
-  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}" font-size="${state.tipLabelSize}"${bold} text-anchor="${anchor}" transform="rotate(${angleDeg},${x},${y})" data-tip="${node.name}" data-species="${node.sp || ""}">${label}</text>`);
+  const suffix = marker && marker.text ? ` [${marker.text}]` : "";
+  fragments.push(`<text x="${x}" y="${y}" class="tip-label" fill="${color}" font-size="${state.tipLabelSize}"${bold} text-anchor="${anchor}" transform="rotate(${angleDeg},${x},${y})" data-tip="${node.name}" data-species="${node.sp || ""}">${label}${suffix}</text>`);
   if (isMotif && motifColors.length > 0) {
     const rad = angleDeg * Math.PI / 180;
     drawMotifPie(fragments, x - 6 * Math.cos(rad), y - 6 * Math.sin(rad), 3, motifColors);
@@ -546,6 +623,10 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
         `<polygon points="${node.x},${node.y} ${node.x + triW},${node.y - triH / 2} ${node.x + triW},${node.y + triH / 2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
         `<text x="${node.x + triW + 4}" y="${node.y + 3}" font-size="9" fill="#666">${triLabel}</text>`
       );
+      const colFrag = [];
+      drawNodeDot(colFrag, node.x, node.y, node);
+      drawCollapsedTipMarkers(colFrag, node.x + triW + 4, node.y, node, 0, 12);
+      triangles.push(colFrag.join(""));
       if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
         triangles.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
       }
@@ -570,9 +651,12 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
       const d = state.dotSize;
       const isMotif = state.motifMatches.has(node.name);
       const isName = state.nameMatches.has(node.name);
+      const marker = state.tipMarkers[node.name];
       const spColor = getNodeColor(node, checkedSpecies);
       let fill = "#333";
-      if (isMotif) {
+      if (marker) {
+        fill = marker.color || spColor;
+      } else if (isMotif) {
         const colors = getMotifColors(node.name);
         fill = colors.length > 0 ? colors[0] : "#e22";
       } else if (isName) {
@@ -580,7 +664,7 @@ function drawFastRectangular(fragments, root, checkedSpecies) {
       } else {
         fill = spColor;
       }
-      const r = isMotif || isName || spColor !== "#333" ? d : d * 0.7;
+      const r = marker ? d * 1.5 : isMotif || isName || spColor !== "#333" ? d : d * 0.7;
       dotData.push({ cx: node.x, cy: node.y, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
       if (state.showTipLabels) {
         tipLabels.push({ x: node.x + d + 1, y: node.y + d, node });
@@ -620,6 +704,10 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
         `<path d="M${nx},${ny} L${wx1},${wy1} A${wedgeR},${wedgeR} 0 ${large},1 ${wx2},${wy2} Z" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
         `<text x="${(wx1 + wx2) / 2 + 4}" y="${(wy1 + wy2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
       );
+      const colFrag = [];
+      drawNodeDot(colFrag, nx, ny, node);
+      drawCollapsedTipMarkers(colFrag, (wx1 + wx2) / 2 + 4, (wy1 + wy2) / 2, node, 0, 12);
+      triangles.push(colFrag.join(""));
       if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
         triangles.push(`<circle cx="${nx}" cy="${ny}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
       }
@@ -650,9 +738,12 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
       const d = state.dotSize;
       const isMotif = state.motifMatches.has(node.name);
       const isName = state.nameMatches.has(node.name);
+      const marker = state.tipMarkers[node.name];
       const spColor = getNodeColor(node, checkedSpecies);
       let fill = "#333";
-      if (isMotif) {
+      if (marker) {
+        fill = marker.color || spColor;
+      } else if (isMotif) {
         const colors = getMotifColors(node.name);
         fill = colors.length > 0 ? colors[0] : "#e22";
       } else if (isName) {
@@ -660,7 +751,7 @@ function drawFastCircular(fragments, root, checkedSpecies, toXY) {
       } else {
         fill = spColor;
       }
-      const r = isMotif || isName || spColor !== "#333" ? d : d * 0.7;
+      const r = marker ? d * 1.5 : isMotif || isName || spColor !== "#333" ? d : d * 0.7;
       dotData.push({ cx: nx, cy: ny, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
       if (state.showTipLabels) {
         const gap = d + 1;
@@ -707,6 +798,10 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
         `<polygon points="${node.x},${node.y} ${x1},${y1} ${x2},${y2}" class="collapsed-triangle" data-nodeid="${node.id}"/>` +
         `<text x="${(x1 + x2) / 2 + 2}" y="${(y1 + y2) / 2}" font-size="9" fill="#666">${node.tipCount}</text>`
       );
+      const colFrag = [];
+      drawNodeDot(colFrag, node.x, node.y, node);
+      drawCollapsedTipMarkers(colFrag, (x1 + x2) / 2 + 2, (y1 + y2) / 2, node, 0, 12);
+      triangles.push(colFrag.join(""));
       if (state.selectedTip && collectAllTipNames(node).includes(state.selectedTip)) {
         triangles.push(`<circle cx="${node.x}" cy="${node.y}" r="16" fill="none" stroke="#e22" stroke-width="3" class="selected-tip-ring"/>`);
       }
@@ -730,9 +825,12 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
       const d = state.dotSize;
       const isMotif = state.motifMatches.has(node.name);
       const isName = state.nameMatches.has(node.name);
+      const marker = state.tipMarkers[node.name];
       const spColor = getNodeColor(node, checkedSpecies);
       let fill = "#333";
-      if (isMotif) {
+      if (marker) {
+        fill = marker.color || spColor;
+      } else if (isMotif) {
         const colors = getMotifColors(node.name);
         fill = colors.length > 0 ? colors[0] : "#e22";
       } else if (isName) {
@@ -740,7 +838,7 @@ function drawFastUnrooted(fragments, root, checkedSpecies) {
       } else {
         fill = spColor;
       }
-      const r = isMotif || isName || spColor !== "#333" ? d : d * 0.7;
+      const r = marker ? d * 1.5 : isMotif || isName || spColor !== "#333" ? d : d * 0.7;
       dotData.push({ cx: node.x, cy: node.y, r, fill, isTip: true, tipName: node.name, species: node.sp || "" });
       if (state.showTipLabels) {
         const gap = d + 1;

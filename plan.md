@@ -2,25 +2,25 @@
 
 ## Summary
 
-Convert PhyloScope to a browser-only app, but ship it as a built `browser/dist/` bundle rather than raw source files. This is the safest way to support both static hosting and direct `file://` use without the current `/static/...` and ES-module assumptions.
+Convert PhyloScope to a browser-only app, but ship it as a built `src/dist/` bundle rather than raw source files. This is the safest way to support both static hosting and direct `file://` use without the current `/static/...` and ES-module assumptions.
 
 Keep the existing renderer and most of `tree-utils.js`; move backend-only parsing, tree mutation, export, and dataset logic into a new client-side data layer.
 
-Do not delete `browser/app.py`, `browser/run.sh`, or `environment.yml` until the standalone bundle reaches feature parity and the docs are updated. Use the Python app as the migration oracle during implementation.
+Do not delete `src/app.py`, `src/run.sh`, or `environment.yml` until the standalone bundle reaches feature parity and the docs are updated. Use the Python app as the migration oracle during implementation.
 
 ## Key Changes
 
 ### Runtime and packaging
 
-- Add a small dev-only build step with esbuild and a `browser/package.json`.
-- Source remains modular under `browser/static/js/`; build output is a bundled `browser/dist/index.html`, `app.bundle.js`, `style.css`, `logo.png`, `jspdf.umd.min.js`, and `svg2pdf.umd.min.js`.
+- Add a small dev-only build step with esbuild and a `src/package.json`.
+- Source remains modular under `src/static/js/`; build output is a bundled `src/dist/index.html`, `app.bundle.js`, `style.css`, `logo.png`, `jspdf.umd.min.js`, and `svg2pdf.umd.min.js`.
 - Remove absolute `/static/...` references in source templates; emitted bundle uses relative paths only.
-- **Acceptance criterion:** opening `browser/dist/index.html` must make zero `/api/...` requests and zero absolute `/static/...` requests.
+- **Acceptance criterion:** opening `src/dist/index.html` must make zero `/api/...` requests and zero absolute `/static/...` requests.
 
 ### Client data layer
 
-- Add `browser/static/js/parsers.js` with `parseNewick`, `parseFastaText`, `parseNumericValue`, `parseDatasetText`, and `prositeToRegex`.
-- Add `browser/static/js/tree-ops.js` with `annotateSpecies`, `buildSpeciesMapFromFiles`, `findNodesWithSpecies`, `rerootTree`, `nodeToNewick`, `refPosToColumns`, `computePairwiseIdentity`, and `buildExportFasta`.
+- Add `src/static/js/parsers.js` with `parseNewick`, `parseFastaText`, `parseNumericValue`, `parseDatasetText`, and `prositeToRegex`.
+- Add `src/static/js/tree-ops.js` with `annotateSpecies`, `buildSpeciesMapFromFiles`, `findNodesWithSpecies`, `rerootTree`, `nodeToNewick`, `refPosToColumns`, `computePairwiseIdentity`, and `buildExportFasta`.
 - Keep the canonical tree shape as the current frontend wire format: `{ id, bl, name?, sup?, sp?, ch? }`. Internal-only annotations may add `descendantSpecies`.
 - Reuse existing helpers in `tree-utils.js` for indexing, copying, tip collection, and patristic distance rather than reimplementing them.
 
@@ -107,7 +107,7 @@ Modify `index.html`: folder picker + multi-file fallback. Wire events in `action
 Redesign `saveSession()` and `loadSession()` to use v2 self-contained format with v1 backward compat.
 
 ### Phase 7: Build Pipeline
-Add `browser/package.json` with esbuild. Build to `browser/dist/` with bundled HTML, JS, CSS, and assets. Relative paths only.
+Add `src/package.json` with esbuild. Build to `src/dist/` with bundled HTML, JS, CSS, and assets. Relative paths only.
 
 ### Phase 8: Cleanup
 Update README. Keep `app.py`, `run.sh`, `environment.yml` in-repo until parity is confirmed.
@@ -142,8 +142,8 @@ Run full UI regressions:
 
 Distribution smoke tests:
 
-- open `browser/dist/index.html` directly from disk
-- serve `browser/dist/` from a simple static server
+- open `src/dist/index.html` directly from disk
+- serve `src/dist/` from a simple static server
 - confirm no backend dependency in either case
 
 ## Assumptions
@@ -155,4 +155,4 @@ Distribution smoke tests:
 
 ## End Result
 
-A `browser/dist/` folder you can open directly in a browser or host on any static server. No Python, no server, no install required. Could be zipped into a single distributable archive.
+A `src/dist/` folder you can open directly in a browser or host on any static server. No Python, no server, no install required. Could be zipped into a single distributable archive.

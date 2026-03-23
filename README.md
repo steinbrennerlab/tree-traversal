@@ -6,7 +6,7 @@
 
 A lightweight, local-first phylogenetic tree viewer with built-in sequence tools. Runs entirely in the browser — no server, no install required.
 
-The frontend is organized as small ES modules under `browser/static/js/`, bundled into a single distributable folder (`docs/`) via esbuild.
+The frontend is organized as small ES modules under `src/static/js/`, bundled into a single distributable folder (`docs/`) via esbuild.
 
 ![PhyloScope screenshot](screenshot.png)
 
@@ -200,11 +200,11 @@ An example dataset is provided in `example_data/`.
 
 ## Legacy Server Mode
 
-The original FastAPI server (`browser/app.py`) remains in the repository as a reference implementation. To run it:
+The original FastAPI server (`src/app.py`) remains in the repository as a reference implementation. To run it:
 
 ```bash
 # Requires Python 3.10+ with fastapi and uvicorn
-cd browser
+cd src
 python3 app.py
 # Then open http://localhost:8000
 ```
@@ -223,7 +223,7 @@ docs/                 # Built standalone app (open index.html)
   logo.png
   jspdf.umd.min.js
   svg2pdf.umd.min.js
-browser/
+src/
   app.py              # FastAPI backend (legacy server mode)
   run.sh              # Server launch script (legacy)
   package.json        # Node.js build config

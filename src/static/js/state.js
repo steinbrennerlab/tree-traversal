@@ -48,7 +48,9 @@ export const state = {
   hiddenTips: new Set(),
   nodeLabels: {},
   nodeLabelIcons: {},
+  nodeLabelColors: {},
   labelFontSize: 10,
+  tipMarkers: {},      // tipName → { text, color, icon }
 
   // Layout & render
   layoutMode: "rectangular",
@@ -162,7 +164,9 @@ export function resetClientState() {
   state.hiddenTips = new Set();
   state.nodeLabels = {};
   state.nodeLabelIcons = {};
+  state.nodeLabelColors = {};
   state.labelFontSize = 10;
+  state.tipMarkers = {};
   state.layoutMode = "rectangular";
   state.usePhylogram = true;
   state.showTipLabels = true;

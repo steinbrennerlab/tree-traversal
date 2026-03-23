@@ -67,7 +67,11 @@
   <div class="section" id="loaded-info-section" style="display:none;">
     <h3>Loaded Data</h3>
     <div id="loaded-info" class="loaded-info"></div>
-    <button id="reset-btn" class="btn" style="margin-top:4px;">Load different data</button>
+    <div class="row" style="margin-top:4px;">
+      <button id="reset-btn" class="btn" style="flex:1;">Load different data</button>
+      <button id="undo-btn" class="btn-sm" disabled>Undo</button>
+      <button id="redo-btn" class="btn-sm" disabled>Redo</button>
+    </div>
   </div>
 
   <div class="section">
@@ -103,10 +107,6 @@
     <h3>Subtree Focus</h3>
     <p class="hint" id="subtree-hint">Click: select node &amp; copy FASTA<br>Shift+click: collapse/expand<br>Ctrl+click: view subtree in isolation<br>Ctrl+Shift+click: re-root at node</p>
     <button id="sidebar-back-full-tree" class="btn" style="display:none;">Back to full tree</button>
-    <div class="row" style="margin-top:6px;">
-      <button id="undo-btn" class="btn-sm" disabled>Undo</button>
-      <button id="redo-btn" class="btn-sm" disabled>Redo</button>
-    </div>
   </div>
 
   <div class="section">
@@ -119,13 +119,67 @@
   </div>
 
   <div class="section">
-    <h3>Name Search</h3>
+    <h3>Name Search (Tip labels)</h3>
     <div class="row">
       <input type="text" id="name-input" placeholder="e.g. Phvul or YS121">
       <button id="name-search" class="btn">Search</button>
     </div>
     <div id="name-result"></div>
     <div id="name-matches-list" class="name-matches-list"></div>
+    <div id="tip-label-input-container" style="display:none;">
+      <div class="row" style="flex-wrap:wrap;">
+        <input type="text" id="tip-label-input" placeholder="Label for selected tip" style="min-width:80px;">
+        <select id="tip-label-icon-select" class="label-icon-select"></select>
+        <select id="tip-label-color-select">
+          <option value="#e22">Red</option>
+          <option value="#2563eb">Blue</option>
+          <option value="#16a34a">Green</option>
+          <option value="#ea580c">Orange</option>
+          <option value="#9333ea">Purple</option>
+          <option value="#0891b2">Teal</option>
+          <option value="#be185d">Pink</option>
+          <option value="#854d0e">Brown</option>
+          <option value="#333">Black</option>
+          <option value="custom">Custom&hellip;</option>
+        </select>
+        <input type="color" id="tip-label-color-custom" value="#e22" style="display:none;width:28px;padding:0;border:1px solid #bbb;border-radius:3px;">
+        <button id="set-tip-label-btn" class="btn">Set</button>
+      </div>
+    </div>
+    <div class="row">
+      <button id="upload-tip-labels-btn" class="btn">Upload tip labels</button>
+      <input type="file" id="tip-labels-file" accept=".txt,.tsv,.csv" style="display:none;">
+    </div>
+    <div id="tip-labels-upload-result" class="hint"></div>
+    <div id="tip-label-list"></div>
+  </div>
+
+  <div class="section">
+    <h3>Clade Labels</h3>
+    <div id="label-input-container" style="display:none;">
+      <div class="row" style="flex-wrap:wrap;">
+        <input type="text" id="node-label-input" placeholder="Label for selected node" style="min-width:80px;">
+        <select id="node-label-color-select">
+          <option value="#333">Black</option>
+          <option value="#e22">Red</option>
+          <option value="#2563eb">Blue</option>
+          <option value="#16a34a">Green</option>
+          <option value="#ea580c">Orange</option>
+          <option value="#9333ea">Purple</option>
+          <option value="#0891b2">Teal</option>
+          <option value="#be185d">Pink</option>
+          <option value="#854d0e">Brown</option>
+          <option value="custom">Custom&hellip;</option>
+        </select>
+        <input type="color" id="node-label-color-custom" value="#333" style="display:none;width:28px;padding:0;border:1px solid #bbb;border-radius:3px;">
+        <button id="set-label-btn" class="btn">Set</button>
+      </div>
+    </div>
+    <div id="label-size-container" class="row" style="display:none;">
+      <label>Label size (pt): <input type="number" id="label-font-size" min="1" max="72" value="10" style="width:48px;"></label>
+    </div>
+    <div id="label-list"></div>
+    <p class="hint" id="label-hint">Select a node to add a label</p>
   </div>
 
   <div class="section">
@@ -173,21 +227,6 @@
       <button id="filter-show-all-btn" class="btn-sm">Show all</button>
     </div>
     <div id="filter-result" class="hint"></div>
-  </div>
-
-  <div class="section">
-    <h3>Clade Labels</h3>
-    <div id="label-input-container" style="display:none;">
-      <div class="row">
-        <input type="text" id="node-label-input" placeholder="Label for selected node">
-        <button id="set-label-btn" class="btn">Set</button>
-      </div>
-    </div>
-    <div id="label-size-container" class="row" style="display:none;">
-      <label>Label size (pt): <input type="number" id="label-font-size" min="1" max="72" value="10" style="width:48px;"></label>
-    </div>
-    <div id="label-list"></div>
-    <p class="hint" id="label-hint">Select a node to add a label</p>
   </div>
 
   <div class="section">
