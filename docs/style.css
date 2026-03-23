@@ -87,6 +87,10 @@ input[type=text] { flex: 1; }
 .name-match-item:hover { background: #e8f0fe; }
 .name-match-item.name-match-active { background: #fde8e8; color: #e22; font-weight: bold; }
 
+/* Tip label entries */
+.tip-label-entry { display: flex; align-items: center; gap: 4px; padding: 2px 0; font-size: 12px; }
+.tip-label-swatch { width: 14px; height: 14px; border-radius: 2px; border: 1px solid #999; cursor: pointer; flex-shrink: 0; }
+
 /* Selected tip ring on tree */
 .selected-tip-ring { pointer-events: none; }
 

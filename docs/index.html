@@ -126,6 +126,27 @@
     </div>
     <div id="name-result"></div>
     <div id="name-matches-list" class="name-matches-list"></div>
+    <div id="tip-label-input-container" style="display:none;">
+      <div class="row" style="flex-wrap:wrap;">
+        <input type="text" id="tip-label-input" placeholder="Label for selected tip" style="min-width:80px;">
+        <select id="tip-label-icon-select" class="label-icon-select"></select>
+        <select id="tip-label-color-select">
+          <option value="#e22">Red</option>
+          <option value="#2563eb">Blue</option>
+          <option value="#16a34a">Green</option>
+          <option value="#ea580c">Orange</option>
+          <option value="#9333ea">Purple</option>
+          <option value="#0891b2">Teal</option>
+          <option value="#be185d">Pink</option>
+          <option value="#854d0e">Brown</option>
+          <option value="#333">Black</option>
+          <option value="custom">Custom&hellip;</option>
+        </select>
+        <input type="color" id="tip-label-color-custom" value="#e22" style="display:none;width:28px;padding:0;border:1px solid #bbb;border-radius:3px;">
+        <button id="set-tip-label-btn" class="btn">Set</button>
+      </div>
+    </div>
+    <div id="tip-label-list"></div>
   </div>
 
   <div class="section">
