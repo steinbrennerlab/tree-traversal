@@ -613,22 +613,34 @@ function handleTipLabelsUpload(file) {
   if (!state.treeData) return;
   const reader = new FileReader();
   reader.onload = () => {
-    const lines = reader.result.split(/\r?\n/);
+    const lines = reader.result.split(/\r?\n/).filter(l => l.trim());
+    if (!lines.length) return;
     const allTips = new Set(collectAllTipNames(state.treeData));
-    const names = [];
-    for (const line of lines) {
-      const col = line.split("\t")[0].trim();
-      if (col) names.push(col);
+
+    // Check if the first row has a "label" column header
+    const headerCols = lines[0].split("\t");
+    const labelColIdx = headerCols.findIndex(c => c.trim().toLowerCase() === "label");
+    const hasHeader = labelColIdx !== -1;
+    const dataLines = hasHeader ? lines.slice(1) : lines;
+
+    const entries = []; // { name, text }
+    for (const line of dataLines) {
+      const cols = line.split("\t");
+      const name = cols[0].trim();
+      if (!name) continue;
+      const text = hasHeader ? (cols[labelColIdx] || "").trim() : name;
+      entries.push({ name, text });
     }
+
     pushUndo();
     let matched = 0;
-    for (const name of names) {
+    for (const { name, text } of entries) {
       if (allTips.has(name) && !state.tipMarkers[name]) {
-        state.tipMarkers[name] = { text: "", color: "#e22", icon: "dot" };
+        state.tipMarkers[name] = { text, color: "#e22", icon: "dot" };
         matched++;
       }
     }
-    const notFound = names.length - matched;
+    const notFound = entries.length - matched;
     const resultEl = document.getElementById("tip-labels-upload-result");
     resultEl.textContent = `${matched} tips labeled` + (notFound > 0 ? ` (${notFound} names not found)` : "");
     invalidateRenderCache();
